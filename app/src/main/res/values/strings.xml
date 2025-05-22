@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">AboneKaptan Mobile</string>
+    <string name="sign_in_prompt">Aboneliklerinizi yönetmek için Google ile oturum açın.</string>
+    <string name="sign_in_with_google">Google ile Oturum Aç</string>
+    <string name="sign_in_button">Oturum Aç Butonu</string>
+    <string name="refresh_subscriptions">Abonelikleri Yenile</string>
+    <string name="sign_out">Oturumu Kapat</string>
+    <string name="active_subscriptions">Aktif Abonelikler</string>
+    <string name="forgotten_subscriptions">Unutulmuş (İnaktif) Abonelikler</string>
+    <string name="cancelled_subscriptions">İptal Edilmiş Abonelikler</string>
+    <string name="unknown_subscriptions">Bilinmeyen Durum</string>
+    <string name="email_count">E-posta Sayısı</string>
+    <string name="last_email_date">Son E-posta Tarihi</string>
+    <string name="cancellation_date">İptal Tarihi</string>
+    <string name="is_this_wrong">Bu yanlış mı?</string>
+    <string name="feedback_dialog_title">%1$s için geri bildirim</string>
+    <string name="current_status_is">Mevcut durum: %1$s</string>
+    <string name="why_is_this_wrong">Neden yanlış olduğunu düşünüyorsunuz?</string>
+    <string name="feedback_option_is_subscription_active">Bu bir abonelik ve AKTİF</string>
+    <string name="feedback_option_is_subscription_forgotten">Bu bir abonelik ve UNUTULMUŞ</string>
+    <string name="feedback_option_is_cancelled">Bu abonelik İPTAL EDİLMİŞ</string>
+    <string name="feedback_option_not_a_subscription">Bu bir abonelik DEĞİL</string>
+    <string name="feedback_option_other">Diğer (Açıklayın)</string>
+    <string name="feedback_note_other">Notunuz (isteğe bağlı)</string>
+    <string name="submit_feedback">Gönder</string>
+    <string name="cancel">İptal</string>
+    <string name="no_subscriptions_found">Abonelik bulunamadı veya yüklenemedi. Lütfen yenileyin veya daha sonra tekrar deneyin.</string>
+    <string name="error_loading_subscriptions">Abonelikler yüklenirken hata oluştu.</string>
+    <string name="feedback_submitted">Geri bildiriminiz gönderildi.</string>
+</resources>
