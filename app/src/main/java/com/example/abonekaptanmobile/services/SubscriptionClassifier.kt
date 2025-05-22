@@ -33,7 +33,7 @@ class SubscriptionClassifier @Inject constructor(
 
     companion object {
         // Confidence threshold for AI model's predictions to be considered valid.
-        private const val CONFIDENCE_THRESHOLD = 0.70f
+        private const val CONFIDENCE_THRESHOLD = 0.60f
         // Constant for active subscription status in the database.
         private const val STATUS_ACTIVE = "ACTIVE"
         // Constant for cancelled subscription status in the database.

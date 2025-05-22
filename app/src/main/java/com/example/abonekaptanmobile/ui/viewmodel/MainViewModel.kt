@@ -142,7 +142,7 @@ class MainViewModel @Inject constructor(
             Log.i("MainViewModel", "Starting email classification and DB refresh...")
             try {
                 // Step 1: Fetch emails (max 300 for now, can be configured)
-                val rawEmails = gmailRepository.fetchEmails(maxTotalEmails = 300)
+                val rawEmails = gmailRepository.fetchEmails(maxTotalEmails = 1000)
                 Log.d("MainViewModel", "Fetched ${rawEmails.size} raw emails from GmailRepository.")
 
                 // Prepare emails (e.g., ensure snippets are populated)
