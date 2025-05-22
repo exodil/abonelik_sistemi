@@ -121,11 +121,12 @@ class SubscriptionClassifier @Inject constructor(
      */
     private suspend fun handlePaidSubscriptionEvent(email: RawEmail, serviceName: String, userId: String?) {
         val existingSubscription = userSubscriptionDao.getLatestSubscriptionByServiceNameAndUserId(serviceName, userId)
+        val endDate = existingSubscription?.subscriptionEndDate // Store in a local variable
 
         // Scenario 1: No existing subscription found, or it was cancelled and this email is newer than the cancellation end date.
         // This indicates a new subscription or a re-subscription.
         if (existingSubscription == null ||
-            (existingSubscription.status == STATUS_CANCELLED && existingSubscription.subscriptionEndDate != null && email.date > existingSubscription.subscriptionEndDate!!)) {
+            (existingSubscription.status == STATUS_CANCELLED && endDate != null && email.date > endDate)) {
             val newSub = UserSubscriptionEntity(
                 serviceName = serviceName,
                 userId = userId,
@@ -259,6 +260,10 @@ class SubscriptionClassifier @Inject constructor(
             PatternType.SUBJECT_KEYWORD -> email.subject.lowercase()
             PatternType.BODY_KEYWORD -> bodyText.lowercase()
             PatternType.COMBINED, PatternType.UNKNOWN -> "${email.from} ${email.subject} $bodyText".lowercase()
+            else -> {
+                Log.w("SubscriptionClassifier", "Unknown pattern type: ${pattern.patternType}, defaulting to combined search.")
+                "${email.from} ${email.subject} $bodyText".lowercase()
+            }
         }
         return try {
             val regex = Regex(pattern.regexPattern, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))

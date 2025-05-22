@@ -48,7 +48,7 @@ fun SubscriptionListScreen(viewModel: MainViewModel) {
                 .padding(8.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            IconButton(onClick = { viewModel.loadSubscriptions() }) {
+            IconButton(onClick = { viewModel.classifyAndRefreshDb() }) {
                 Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.refresh_subscriptions))
             }
             Button(onClick = { viewModel.signOut() }) {

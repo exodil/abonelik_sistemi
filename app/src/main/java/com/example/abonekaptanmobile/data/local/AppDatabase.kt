@@ -17,7 +17,7 @@ import com.example.abonekaptanmobile.data.local.entity.PatternType // PatternTyp
 @Database(
     entities = [SubscriptionPatternEntity::class, FeedbackEntity::class, UserSubscriptionEntity::class], // Changed to UserSubscriptionEntity::class
     version = 4, // Incremented version to 4
-    exportSchema = true
+    exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun communityPatternDao(): CommunityPatternDao
