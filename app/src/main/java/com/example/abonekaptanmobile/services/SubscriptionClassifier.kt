@@ -30,12 +30,15 @@ class SubscriptionClassifier @Inject constructor(
     private val huggingFaceRepository: HuggingFaceRepository,
     private val userSubscriptionDao: UserSubscriptionDao
 ) {
-    // Confidence threshold for AI model's predictions to be considered valid.
-    private const val CONFIDENCE_THRESHOLD = 0.70f
-    // Constant for active subscription status in the database.
-    private const val STATUS_ACTIVE = "ACTIVE"
-    // Constant for cancelled subscription status in the database.
-    private const val STATUS_CANCELLED = "CANCELLED"
+
+    companion object {
+        // Confidence threshold for AI model's predictions to be considered valid.
+        private const val CONFIDENCE_THRESHOLD = 0.70f
+        // Constant for active subscription status in the database.
+        private const val STATUS_ACTIVE = "ACTIVE"
+        // Constant for cancelled subscription status in the database.
+        private const val STATUS_CANCELLED = "CANCELLED"
+    }
 
     /**
      * Classifies a list of raw emails to identify subscription lifecycle events and updates the database accordingly.
