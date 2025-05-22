@@ -42,11 +42,14 @@ class GmailRepository @Inject constructor(private val gmailApi: GmailApi) {
         "kargo takip", "shipping update", "teslimat", "delivery", "bildirim", "notification"
     )
 
+       fix/subscription-detection-improv
     suspend fun fetchEmails(
         maxResultsPerQuery: Int = 50,
         maxTotalEmails: Int = 1000,
         onProgress: suspend (fetchedCount: Int, totalToFetch: Int) -> Unit
     ): List<RawEmail> = withContext(Dispatchers.IO) {
+   // suspend fun fetchEmails(maxResultsPerQuery: Int = 50, maxTotalEmails: Int = 1000): List<RawEmail> = withContext(Dispatchers.IO) {
+// feat/ai-subscription-lifecycle
         val rawEmails = mutableListOf<RawEmail>()
         var nextPageToken: String? = null
         val processedMessageIds = mutableSetOf<String>()
