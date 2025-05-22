@@ -172,19 +172,12 @@ class MainViewModel @Inject constructor(
                 _progressPercentage.value = 25 // Ensure it's at least 25%
                 _progressMessage.value = "E-postalar alındı (${rawEmails.size} adet). Sınıflandırma başlıyor..."
 
-                // Prepare emails (e.g., ensure snippets are populated)
-                val emailsWithSnippets = rawEmails.map { email ->
-                    email.copy(
-                        bodySnippet = email.bodySnippet ?: (email.snippet.takeIf { it.isNotBlank() } ?: email.bodyPlainText).take(250)
-                    )
-                }
-
                 // Step 2: Classify emails (this now writes to the DB)
-                if (emailsWithSnippets.isNotEmpty()) {
+                if (rawEmails.isNotEmpty()) { // Changed from emailsWithSnippets to rawEmails
                     // _progressPercentage.value is already 25 at this point.
-                    _progressMessage.value = "E-postalar alındı (${emailsWithSnippets.size} adet). Sınıflandırma başlıyor..."
+                    _progressMessage.value = "E-postalar alındı (${rawEmails.size} adet). Sınıflandırma başlıyor..." // Changed from emailsWithSnippets to rawEmails
                     subscriptionClassifier.classifyEmails(
-                        allRawEmails = emailsWithSnippets,
+                        allRawEmails = rawEmails, // Changed from emailsWithSnippets to rawEmails
                         onProgress = { processedCount, totalToProcess ->
                             // Classification phase is 25% to 90% of total progress
                             val classificationProgress = if (totalToProcess > 0) {
