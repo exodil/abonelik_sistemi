@@ -42,7 +42,11 @@ class GmailRepository @Inject constructor(private val gmailApi: GmailApi) {
         "kargo takip", "shipping update", "teslimat", "delivery", "bildirim", "notification"
     )
 
-    suspend fun fetchEmails(maxResultsPerQuery: Int = 50, maxTotalEmails: Int = 300): List<RawEmail> = withContext(Dispatchers.IO) {
+    suspend fun fetchEmails(
+        maxResultsPerQuery: Int = 50,
+        maxTotalEmails: Int = 1000,
+        onProgress: suspend (fetchedCount: Int, totalToFetch: Int) -> Unit
+    ): List<RawEmail> = withContext(Dispatchers.IO) {
         val rawEmails = mutableListOf<RawEmail>()
         var nextPageToken: String? = null
         val processedMessageIds = mutableSetOf<String>()
@@ -105,21 +109,17 @@ class GmailRepository @Inject constructor(private val gmailApi: GmailApi) {
                 for (detailedMessage in detailedMessages) {
                     if (rawEmails.size < maxTotalEmails) {
                         parseGmailMessage(detailedMessage)?.let { rawEmail ->
-                            // Bu ön filtrelemeyi burada yapmak yerine, tüm e-postaları çekip
-                            // SubscriptionClassifier'a bırakmak daha iyi olabilir.
-                            // Şimdilik basit bir kontrolle devam edelim.
-                            // if (isPotentiallySubscriptionRelated(rawEmail)) {
                             rawEmails.add(rawEmail)
-                            // } else {
-                            //     Log.d("GmailRepository", "Email (Subject: ${rawEmail.subject.take(30)}) not potentially subscription related, skipping.")
-                            // }
                         }
                     } else {
                         Log.d("GmailRepository", "Max total emails limit reached within batch processing.")
                         limitReachedInOutermostLoop = true
-                        break
+                        break 
                     }
                 }
+                // Report progress after processing the current batch or if limit is reached
+                onProgress(rawEmails.size, maxTotalEmails)
+
 
                 if (limitReachedInOutermostLoop) {
                     nextPageToken = null
@@ -133,6 +133,9 @@ class GmailRepository @Inject constructor(private val gmailApi: GmailApi) {
             Log.e("GmailRepository", "Error during email fetching process: ${e.message}", e)
             // Hata durumunda boş liste dönmek yerine, ViewModel'in hatayı yakalaması için
             // exception'ı tekrar fırlatmak daha iyi olabilir: throw e
+        } finally {
+            // Ensure final progress is reported, especially if loop terminated unexpectedly or completed.
+            onProgress(rawEmails.size, maxTotalEmails)
         }
         Log.i("GmailRepository", "Finished fetching emails. Total raw emails collected: ${rawEmails.size}")
         return@withContext rawEmails
