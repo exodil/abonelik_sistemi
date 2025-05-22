@@ -164,8 +164,10 @@ object AppModule {
     @Singleton
     fun provideSubscriptionClassifier(
         communityPatternRepo: CommunityPatternRepository,
-        huggingFaceRepository: HuggingFaceRepository
+        huggingFaceRepository: HuggingFaceRepository,
+        userSubscriptionDao: UserSubscriptionDao // Added parameter
     ): SubscriptionClassifier {
-        return SubscriptionClassifier(communityPatternRepo, huggingFaceRepository)
+        // Pass the new dependency to the constructor
+        return SubscriptionClassifier(communityPatternRepo, huggingFaceRepository, userSubscriptionDao)
     }
 }
