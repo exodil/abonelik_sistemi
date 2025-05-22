@@ -48,14 +48,14 @@ class GmailRepository @Inject constructor(private val gmailApi: GmailApi) {
         val processedMessageIds = mutableSetOf<String>()
 
         // TEST İÇİN BASİT SORGUDAN BAŞLAYALIM, SONRA ORİJİNALİNE DÖNEBİLİRİZ
-        // val query = "in:inbox -in:spam -in:trash"
-        // Log.d("GmailRepository", "Using query: $query")
+        val query = "in:inbox -in:spam -in:trash"
+        Log.d("GmailRepository", "Using query: $query")
 
         // Orijinal, daha karmaşık sorgu (testten sonra bunu açabilirsiniz):
-        val domainQueryPart = trustedSenderDomains.joinToString(" OR ") { "from:$it" }
-        val keywordQueryPart = positiveKeywords.joinToString(" OR ") // Tırnaksız daha fazla sonuç verir
-        val query = "($domainQueryPart OR $keywordQueryPart) -in:spam -in:trash"
-        Log.d("GmailRepository", "Using complex query: $query")
+        // val domainQueryPart = trustedSenderDomains.joinToString(" OR ") { "from:$it" }
+        // val keywordQueryPart = positiveKeywords.joinToString(" OR ") // Tırnaksız daha fazla sonuç verir
+        // val query = "($domainQueryPart OR $keywordQueryPart) -in:spam -in:trash"
+        // Log.d("GmailRepository", "Using complex query: $query")
 
         try {
             var limitReachedInOutermostLoop = false
