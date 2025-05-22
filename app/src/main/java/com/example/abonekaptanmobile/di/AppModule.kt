@@ -8,6 +8,7 @@ import com.example.abonekaptanmobile.auth.GoogleAuthManager
 import com.example.abonekaptanmobile.data.local.AppDatabase // AppDatabase importu
 import com.example.abonekaptanmobile.data.local.dao.CommunityPatternDao
 import com.example.abonekaptanmobile.data.local.dao.FeedbackDao
+import com.example.abonekaptanmobile.data.local.dao.UserSubscriptionDao // Added UserSubscriptionDao import
 import com.example.abonekaptanmobile.data.remote.GmailApi
 import com.example.abonekaptanmobile.data.remote.HuggingFaceApi
 import com.example.abonekaptanmobile.data.repository.CommunityPatternRepository
@@ -107,7 +108,7 @@ object AppModule {
             AppDatabase::class.java,
             AppDatabase.DATABASE_NAME
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3) // <<--- MIGRATION_2_3 EKLENDİ
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4) // Added MIGRATION_3_4
             // .fallbackToDestructiveMigration() // Geliştirme sırasında şemayı silip yeniden oluşturur, dikkatli kullanın
             .build()
     }
@@ -122,6 +123,12 @@ object AppModule {
     @Provides
     fun provideFeedbackDao(appDatabase: AppDatabase): FeedbackDao {
         return appDatabase.feedbackDao()
+    }
+
+    @Singleton
+    @Provides
+    fun provideUserSubscriptionDao(appDatabase: AppDatabase): UserSubscriptionDao { // Added UserSubscriptionDao provider
+        return appDatabase.userSubscriptionDao()
     }
 
     @Provides

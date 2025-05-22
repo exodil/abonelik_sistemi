@@ -1,427 +1,263 @@
 // file: app/java/com/example/abonekaptanmobile/services/SubscriptionClassifier.kt
 package com.example.abonekaptanmobile.services
 
-import android.util.Log
+import android.util.Log // Single import for Log
+import com.example.abonekaptanmobile.data.local.dao.UserSubscriptionDao
 import com.example.abonekaptanmobile.data.local.entity.PatternType
 import com.example.abonekaptanmobile.data.local.entity.SubscriptionPatternEntity
-import com.example.abonekaptanmobile.data.remote.model.ClassificationResult
-import com.example.abonekaptanmobile.data.repository.CommunityPatternRepository
+import com.example.abonekaptanmobile.data.local.entity.UserSubscriptionEntity
+import com.example.abonekaptanmobile.data.repository.CommunityPatternRepository // Kept for determineServiceName
 import com.example.abonekaptanmobile.data.repository.HuggingFaceRepository
-import com.example.abonekaptanmobile.model.*
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import java.util.concurrent.TimeUnit
-import java.util.regex.PatternSyntaxException
+import com.example.abonekaptanmobile.model.RawEmail
+import java.util.regex.PatternSyntaxException // Kept for matchesPattern
 import javax.inject.Inject
 
 /**
- * Turkish: E-postaları abonelik durumuna göre sınıflandıran servis.
- * English: Service that classifies emails based on subscription status.
+ * Service responsible for classifying emails to identify subscription-related lifecycle events
+ * (like new subscriptions or cancellations) using AI models and persisting these findings
+ * into the local database. It leverages [HuggingFaceRepository] for AI classification and
+ * [UserSubscriptionDao] for database interactions. Service name identification may still use
+ * [CommunityPatternRepository] as a fallback or supplement.
+ *
+ * Turkish: E-postaları abonelik yaşam döngüsü olaylarına göre (örneğin yeni abonelikler veya
+ * iptaller) AI modelleri kullanarak sınıflandıran ve bu bulguları yerel veritabanına
+ * kaydeden servistir. AI sınıflandırması için [HuggingFaceRepository]'yi ve veritabanı
+ * etkileşimleri için [UserSubscriptionDao]'yu kullanır. Servis adı tanımlama, bir geri
+ * dönüş veya ek olarak [CommunityPatternRepository]'yi kullanabilir.
  */
 class SubscriptionClassifier @Inject constructor(
     private val communityPatternRepo: CommunityPatternRepository,
-    private val huggingFaceRepository: HuggingFaceRepository
+    private val huggingFaceRepository: HuggingFaceRepository,
+    private val userSubscriptionDao: UserSubscriptionDao
 ) {
-    private val inactivityThresholdDays = 90L
-    private val inactivityThresholdMillis = TimeUnit.DAYS.toMillis(inactivityThresholdDays)
-
-    // İptal kalıpları - Geliştirilmiş
-    private val cancelPatterns = listOf(
-        Regex("aboneliğiniz iptal edildi", RegexOption.IGNORE_CASE),
-        Regex("üyeliğiniz sonlandırıldı", RegexOption.IGNORE_CASE),
-        Regex("subscription cancelled", RegexOption.IGNORE_CASE),
-        Regex("membership ended", RegexOption.IGNORE_CASE),
-        Regex("your subscription has been canceled", RegexOption.IGNORE_CASE),
-        Regex("hesabınız kapatıldı", RegexOption.IGNORE_CASE),
-        Regex("account closed", RegexOption.IGNORE_CASE),
-        Regex("iptal onaylandı", RegexOption.IGNORE_CASE),
-        Regex("cancellation confirmed", RegexOption.IGNORE_CASE),
-        Regex("üyeliğiniz sona erdi", RegexOption.IGNORE_CASE),
-        Regex("aboneliğiniz sona ermiştir", RegexOption.IGNORE_CASE),
-        Regex("subscription has been terminated", RegexOption.IGNORE_CASE),
-        Regex("membership has been cancelled", RegexOption.IGNORE_CASE),
-        Regex("we've processed your cancellation", RegexOption.IGNORE_CASE),
-        Regex("your cancellation request", RegexOption.IGNORE_CASE),
-        Regex("iptal talebiniz", RegexOption.IGNORE_CASE),
-        Regex("aboneliğinizi iptal ettiniz", RegexOption.IGNORE_CASE)
-    )
-
-    // Abonelik başlangıç kalıpları
-    private val startPatterns = listOf(
-        Regex("aboneliğiniz başladı", RegexOption.IGNORE_CASE),
-        Regex("üyeliğiniz aktifleştirildi", RegexOption.IGNORE_CASE),
-        Regex("subscription activated", RegexOption.IGNORE_CASE),
-        Regex("welcome to your .* subscription", RegexOption.IGNORE_CASE),
-        Regex("your subscription has started", RegexOption.IGNORE_CASE),
-        Regex("your membership has begun", RegexOption.IGNORE_CASE),
-        Regex("aboneliğiniz başarıyla oluşturuldu", RegexOption.IGNORE_CASE),
-        Regex("üyeliğiniz başarıyla başlatıldı", RegexOption.IGNORE_CASE),
-        Regex("subscription confirmed", RegexOption.IGNORE_CASE),
-        Regex("thank you for subscribing", RegexOption.IGNORE_CASE),
-        Regex("abone olduğunuz için teşekkürler", RegexOption.IGNORE_CASE),
-        Regex("hoş geldiniz", RegexOption.IGNORE_CASE),
-        Regex("welcome to", RegexOption.IGNORE_CASE)
-    )
-
-    // Ödeme kalıpları
-    private val paymentPatterns = listOf(
-        Regex("aylık ödeme planı", RegexOption.IGNORE_CASE),
-        Regex("yıllık ödeme planı", RegexOption.IGNORE_CASE),
-        Regex("monthly subscription payment", RegexOption.IGNORE_CASE),
-        Regex("annual subscription payment", RegexOption.IGNORE_CASE),
-        Regex("faturanız", RegexOption.IGNORE_CASE),
-        Regex("makbuzunuz", RegexOption.IGNORE_CASE),
-        Regex("üyelik ücreti", RegexOption.IGNORE_CASE),
-        Regex("payment receipt", RegexOption.IGNORE_CASE),
-        Regex("invoice for your subscription", RegexOption.IGNORE_CASE),
-        Regex("payment confirmation", RegexOption.IGNORE_CASE),
-        Regex("ödeme onayı", RegexOption.IGNORE_CASE),
-        Regex("ödemeniz alındı", RegexOption.IGNORE_CASE),
-        Regex("payment received", RegexOption.IGNORE_CASE),
-        Regex("\\d+[.,]\\d{2} (TL|USD|EUR|GBP)", RegexOption.IGNORE_CASE),
-        Regex("\\$\\d+[.,]\\d{2}", RegexOption.IGNORE_CASE),
-        Regex("€\\d+[.,]\\d{2}", RegexOption.IGNORE_CASE),
-        Regex("£\\d+[.,]\\d{2}", RegexOption.IGNORE_CASE),
-        Regex("\\d+[.,]\\d{2} ₺", RegexOption.IGNORE_CASE)
-    )
-
-    // Reklam kalıpları
-    private val promotionalPatterns = listOf(
-        Regex("özel teklif", RegexOption.IGNORE_CASE),
-        Regex("special offer", RegexOption.IGNORE_CASE),
-        Regex("limited time offer", RegexOption.IGNORE_CASE),
-        Regex("sınırlı süre teklifi", RegexOption.IGNORE_CASE),
-        Regex("discount", RegexOption.IGNORE_CASE),
-        Regex("indirim", RegexOption.IGNORE_CASE),
-        Regex("kampanya", RegexOption.IGNORE_CASE),
-        Regex("promotion", RegexOption.IGNORE_CASE),
-        Regex("deal", RegexOption.IGNORE_CASE),
-        Regex("fırsat", RegexOption.IGNORE_CASE),
-        Regex("kaçırma", RegexOption.IGNORE_CASE),
-        Regex("don't miss", RegexOption.IGNORE_CASE),
-        Regex("ücretsiz deneme", RegexOption.IGNORE_CASE),
-        Regex("free trial", RegexOption.IGNORE_CASE)
-    )
+    // Confidence threshold for AI model's predictions to be considered valid.
+    private const val CONFIDENCE_THRESHOLD = 0.70f
+    // Constant for active subscription status in the database.
+    private const val STATUS_ACTIVE = "ACTIVE"
+    // Constant for cancelled subscription status in the database.
+    private const val STATUS_CANCELLED = "CANCELLED"
 
     /**
-     * Turkish: E-postaları sınıflandırır ve abonelik öğelerini oluşturur.
-     * English: Classifies emails and creates subscription items.
+     * Classifies a list of raw emails to identify subscription lifecycle events and updates the database accordingly.
+     * Emails are processed in descending order of their date (newest first).
+     * For each email, it attempts to determine the service name, then uses an AI model
+     * ([HuggingFaceRepository.classifySubscriptionLifecycle]) to detect if it's a paid subscription event
+     * or a cancellation event. Based on the classification, it calls helper methods
+     * [handlePaidSubscriptionEvent] or [handlePaidSubscriptionCancellation] to process the event.
+     *
+     * @param allRawEmails A list of [RawEmail] objects to be classified.
+     *
+     * Turkish: Ham e-postaların bir listesini sınıflandırarak abonelik yaşam döngüsü olaylarını
+     * tanımlar ve veritabanını buna göre günceller. E-postalar tarihlerine göre azalan sırada
+     * (en yeniden en eskiye) işlenir. Her e-posta için servis adını belirlemeye çalışır, ardından
+     * ücretli bir abonelik olayı mı yoksa bir iptal olayı mı olduğunu tespit etmek için bir AI modeli
+     * ([HuggingFaceRepository.classifySubscriptionLifecycle]) kullanır. Sınıflandırmaya bağlı olarak,
+     * olayı işlemek için [handlePaidSubscriptionEvent] veya [handlePaidSubscriptionCancellation] yardımcı
+     * metotlarını çağırır.
      */
-    suspend fun classifyEmails(allRawEmails: List<RawEmail>): List<SubscriptionItem> = coroutineScope {
-        Log.i("SubscriptionClassifier", "ClassifyEmails - Input: ${allRawEmails.size} emails.")
+    suspend fun classifyEmails(allRawEmails: List<RawEmail>) {
+        Log.i("SubscriptionClassifier", "classifyEmails - Input: ${allRawEmails.size} emails.")
 
-        // E-postaları tarih sırasına göre sırala (en yeniden en eskiye)
+        // Sort emails by date, newest first, to process events in chronological order.
         val sortedEmails = allRawEmails.sortedByDescending { it.date }
-        val classifiedDetailsCollector = mutableMapOf<String, MutableList<ClassifiedEmail>>()
 
-        // Adım 1: Kesinlikle abonelik olmayanları ele
-        val nonSubscriptionPatterns = communityPatternRepo.getNonSubscriptionPatterns().sortedByDescending { it.priority }
-        Log.d("SubscriptionClassifier", "Fetched ${nonSubscriptionPatterns.size} non-subscription patterns. Examples: ${nonSubscriptionPatterns.take(3).joinToString { it.serviceName }}")
-
-        // Adım 2: Tüm güvenilir abonelik kalıplarını çek ve önceliğe göre sırala
+        // Fetch patterns for service name determination, used as a fallback or supplement to other methods.
         val allReliableSubPatterns = communityPatternRepo.getReliableSubscriptionPatterns()
-            .filter { it.isSubscription } // Sadece abonelik olanları al
-            .sortedByDescending { it.priority }
-        Log.i("SubscriptionClassifier", "Fetched ${allReliableSubPatterns.size} reliable subscription patterns (isSubscription=true, sorted by priority). Examples: ${allReliableSubPatterns.take(5).joinToString { p -> "${p.serviceName}(${p.priority}, ${p.source})" }}")
-
+            .filter { it.isSubscription } // Ensure only actual subscription patterns are used.
+            .sortedByDescending { it.priority } // Process higher priority patterns first for service name.
         if (allReliableSubPatterns.isEmpty()) {
-            Log.w("SubscriptionClassifier", "No reliable subscription patterns found in the database! Seeding might have failed or patterns are not marked correctly.")
+            Log.w("SubscriptionClassifier", "No reliable subscription patterns found for determineServiceName. Service name identification might be less accurate.")
         }
 
-        // Adım 3: Geliştirilmiş AI sınıflandırması ile e-postaları işle
-        val classificationJobs = sortedEmails.map { email ->
-            async {
-                try {
-                    // E-posta içeriğini hazırla
-                    val emailContent = prepareEmailContentForClassification(email)
+        for (email in sortedEmails) {
+            try {
+                val emailContent = prepareEmailContentForClassification(email)
+                val lifecycleResult = huggingFaceRepository.classifySubscriptionLifecycle(emailContent)
 
-                    // Detaylı sınıflandırma yap
-                    val emailTypeResult = huggingFaceRepository.classifyEmailType(emailContent)
-                    val subscriptionResult = huggingFaceRepository.classifySubscription(emailContent)
-                    val paidSubscriptionResult = huggingFaceRepository.classifyPaidSubscription(emailContent)
+                val serviceName = determineServiceName(email, allReliableSubPatterns)
 
-                    // Servis adını belirle
-                    val serviceName = determineServiceName(email, allReliableSubPatterns)
+                // userId is currently null. Future enhancements could allow per-user classification.
+                val userId: String? = null
 
-                    // Abonelik türünü belirle
-                    val subscriptionType = determineSubscriptionType(subscriptionResult, paidSubscriptionResult)
+                // Get scores for relevant lifecycle events.
+                val paidEventScore = lifecycleResult.getScoreForLabel("paid_subscription_event")
+                val cancellationScore = lifecycleResult.getScoreForLabel("paid_subscription_cancellation")
 
-                    // E-posta türünü belirle
-                    val emailType = determineEmailType(emailTypeResult, email)
-
-                    // Ücretli abonelik mi?
-                    val isPaidSubscription = paidSubscriptionResult.label == "paid_subscription" &&
-                                            paidSubscriptionResult.score > 0.65f
-
-                    // Abonelik olma olasılığını kontrol et
-                    val isLikelySubscription = when (subscriptionResult.label) {
-                        "paid_subscription", "free_subscription" -> true
-                        "promotional" -> false
-                        "not_subscription" -> false
-                        else -> subscriptionType != SubscriptionType.NOT_SUBSCRIPTION &&
-                               subscriptionType != SubscriptionType.UNKNOWN
-                    }
-
-                    // Eğer abonelik olma olasılığı varsa veya ödeme/başlangıç/iptal kalıplarıyla eşleşiyorsa
-                    if (isLikelySubscription ||
-                        isPaidSubscription ||
-                        emailType == EmailType.SUBSCRIPTION_START ||
-                        emailType == EmailType.SUBSCRIPTION_CANCEL ||
-                        emailType == EmailType.PAYMENT_CONFIRMATION) {
-
-                        // Sınıflandırma sonucunu kaydet
-                        val classifiedEmail = ClassifiedEmail(
-                            rawEmail = email,
-                            identifiedService = serviceName,
-                            isLikelySubscription = isLikelySubscription,
-                            matchedPatternId = null,
-                            subscriptionType = subscriptionType,
-                            emailType = emailType,
-                            classificationResults = emailTypeResult.allResults,
-                            isPaidSubscription = isPaidSubscription
-                        )
-
-                        synchronized(classifiedDetailsCollector) {
-                            classifiedDetailsCollector.getOrPut(serviceName) { mutableListOf() }.add(classifiedEmail)
-                        }
-
-                        Log.d("SubscriptionClassifier", "AI classified email: ${email.subject.take(30)} for $serviceName, " +
-                                "type: ${emailType.name}, subType: ${subscriptionType.name}, isPaid: $isPaidSubscription")
-                    } else {
-                        Log.d("SubscriptionClassifier", "AI classified email as NOT subscription: ${email.subject.take(30)}, " +
-                                "score: ${subscriptionResult.score}, label: ${subscriptionResult.label}")
-                    }
-                } catch (e: Exception) {
-                    Log.e("SubscriptionClassifier", "Error classifying email: ${e.message}", e)
-                }
-            }
-        }
-
-        // Tüm sınıflandırma işlemlerinin tamamlanmasını bekle
-        classificationJobs.awaitAll()
-
-        // Adım 4: Kalıplarla eşleşmeyen e-postaları işle
-        val processedEmailIds = classifiedDetailsCollector.values.flatten().map { it.rawEmail.id }.toSet()
-        val remainingEmails = sortedEmails.filter { it.id !in processedEmailIds }
-
-        if (remainingEmails.isNotEmpty()) {
-            Log.i("SubscriptionClassifier", "Processing ${remainingEmails.size} remaining emails with patterns")
-
-            // Kalan e-postaları kalıplarla eşleştir
-            val remainingEmailsToProcess = remainingEmails.toMutableList()
-            remainingEmailsToProcess.forEach { email ->
-                // Önce abonelik olmayan kalıplarla kontrol et
-                var matched = false
-                for (pattern in nonSubscriptionPatterns) {
-                    if (!pattern.isSubscription && matchesPattern(email, pattern)) {
-                        Log.v("SubscriptionClassifier", "Email ID ${email.id} (Sub: ${email.subject.take(20)}) matched NON-SUB pattern: '${pattern.serviceName}'")
-                        matched = true
-                        break
-                    }
+                // Determine action based on scores and confidence threshold.
+                // Prioritize paid events if both scores are high but paid is higher.
+                if (paidEventScore >= CONFIDENCE_THRESHOLD && paidEventScore > cancellationScore) {
+                    handlePaidSubscriptionEvent(email, serviceName, userId)
+                } else if (cancellationScore >= CONFIDENCE_THRESHOLD) {
+                    handlePaidSubscriptionCancellation(email, serviceName, userId)
+                } else {
+                    // Log if the email classification is ambiguous or below threshold.
+                    Log.d("SubscriptionClassifier", "Email ${email.id} for $serviceName (user: $userId) did not meet classification thresholds or was ambiguous. PaidScore: $paidEventScore, CancelScore: $cancellationScore. Labels: ${lifecycleResult.allResults.joinToString { it.label + ": " + it.score }}")
                 }
 
-                // Eğer abonelik olmayan kalıplarla eşleşmediyse, abonelik kalıplarıyla kontrol et
-                if (!matched) {
-                    for (pattern in allReliableSubPatterns) {
-                        if (matchesPattern(email, pattern)) {
-                            // E-posta içeriğini hazırla
-                            val emailContent = prepareEmailContentForClassification(email)
-
-                            // Ek sınıflandırma yap
-                            val emailTypeResult = try {
-                                huggingFaceRepository.classifyEmailType(emailContent)
-                            } catch (e: Exception) {
-                                null
-                            }
-
-                            val paidSubscriptionResult = try {
-                                huggingFaceRepository.classifyPaidSubscription(emailContent)
-                            } catch (e: Exception) {
-                                null
-                            }
-
-                            // E-posta türünü belirle
-                            val emailType = if (emailTypeResult != null) {
-                                determineEmailType(emailTypeResult, email)
-                            } else {
-                                determineEmailTypeFromPatterns(email)
-                            }
-
-                            // Ücretli abonelik mi?
-                            val isPaidSubscription = paidSubscriptionResult?.let {
-                                it.label == "paid_subscription" && it.score > 0.65f
-                            } ?: false
-
-                            val detail = ClassifiedEmail(
-                                rawEmail = email,
-                                identifiedService = pattern.serviceName,
-                                isLikelySubscription = true,
-                                matchedPatternId = pattern.id,
-                                subscriptionType = if (isPaidSubscription) SubscriptionType.PAID else SubscriptionType.UNKNOWN,
-                                emailType = emailType,
-                                isPaidSubscription = isPaidSubscription
-                            )
-                            classifiedDetailsCollector.getOrPut(pattern.serviceName) { mutableListOf() }.add(detail)
-                            Log.d("SubscriptionClassifier", "Email ID ${email.id} (Sub: ${email.subject.take(20)}) matched SUB pattern: '${pattern.serviceName}'")
-                            matched = true
-                            break
-                        }
-                    }
-                }
+            } catch (e: Exception) {
+                Log.e("SubscriptionClassifier", "Error processing email ${email.id} (Subject: ${email.subject.take(50)}) in classifyEmails: ${e.message}", e)
             }
         }
-
-        Log.i("SubscriptionClassifier", "Total services identified before creating items: ${classifiedDetailsCollector.keys.size}. Services: ${classifiedDetailsCollector.keys}")
-        return@coroutineScope createSubscriptionItemsFromDetails(classifiedDetailsCollector)
+        Log.i("SubscriptionClassifier", "Finished processing ${allRawEmails.size} emails.")
     }
 
     /**
-     * Turkish: E-posta türünü belirler.
-     * English: Determines the email type.
+     * Handles the logic for when a "paid_subscription_event" is detected for an email.
+     * This can mean a new subscription starting, or a re-activation of a previously cancelled one.
+     * It checks the existing subscription status in the database and either inserts a new
+     * [UserSubscriptionEntity] or updates an existing one.
+     *
+     * @param email The [RawEmail] identified as a paid subscription event.
+     * @param serviceName The name of the service identified for this subscription.
+     * @param userId The identifier for the user; currently nullable and typically null.
+     *
+     * Turkish: Bir e-posta için "paid_subscription_event" algılandığında mantığı işler.
+     * Bu, yeni bir aboneliğin başlaması veya daha önce iptal edilmiş bir aboneliğin yeniden
+     * etkinleştirilmesi anlamına gelebilir. Veritabanındaki mevcut abonelik durumunu kontrol eder ve
+     * ya yeni bir [UserSubscriptionEntity] ekler ya da mevcut olanı günceller.
      */
-    private fun determineEmailType(emailTypeResult: com.example.abonekaptanmobile.data.remote.model.DetailedClassificationResult, email: RawEmail): EmailType {
-        // Önce AI sonucuna göre belirle
-        val primaryLabel = emailTypeResult.primaryLabel
-        val primaryScore = emailTypeResult.primaryScore
+    private suspend fun handlePaidSubscriptionEvent(email: RawEmail, serviceName: String, userId: String?) {
+        val existingSubscription = userSubscriptionDao.getLatestSubscriptionByServiceNameAndUserId(serviceName, userId)
 
-        if (primaryScore > 0.7f) {
-            return when (primaryLabel) {
-                "paid_subscription_confirmation" -> EmailType.SUBSCRIPTION_START
-                "subscription_welcome" -> EmailType.WELCOME_MESSAGE
-                "subscription_cancellation" -> EmailType.SUBSCRIPTION_CANCEL
-                "subscription_renewal" -> EmailType.SUBSCRIPTION_RENEWAL
-                "payment_receipt" -> EmailType.PAYMENT_CONFIRMATION
-                "promotional_offer" -> EmailType.PROMOTIONAL_MESSAGE
-                "general_notification" -> EmailType.GENERAL_NOTIFICATION
-                else -> determineEmailTypeFromPatterns(email)
-            }
+        // Scenario 1: No existing subscription found, or it was cancelled and this email is newer than the cancellation end date.
+        // This indicates a new subscription or a re-subscription.
+        if (existingSubscription == null ||
+            (existingSubscription.status == STATUS_CANCELLED && existingSubscription.subscriptionEndDate != null && email.date > existingSubscription.subscriptionEndDate!!)) {
+            val newSub = UserSubscriptionEntity(
+                serviceName = serviceName,
+                userId = userId,
+                subscriptionStartDate = email.date, // Start date is the date of this email.
+                status = STATUS_ACTIVE,
+                lastEmailIdProcessed = email.id,
+                lastActiveConfirmationDate = email.date, // Confirmation date is also this email's date.
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis()
+            )
+            userSubscriptionDao.insert(newSub)
+            Log.i("SubscriptionClassifier", "New subscription started for $serviceName (user: $userId) from email ${email.id} dated ${email.date}.")
+        // Scenario 2: An active subscription already exists. Update its last active confirmation.
+        } else if (existingSubscription.status == STATUS_ACTIVE) {
+            existingSubscription.lastActiveConfirmationDate = email.date
+            existingSubscription.lastEmailIdProcessed = email.id
+            existingSubscription.updatedAt = System.currentTimeMillis()
+            userSubscriptionDao.update(existingSubscription)
+            Log.i("SubscriptionClassifier", "Subscription activity updated for $serviceName (user: $userId) from email ${email.id} dated ${email.date}.")
+        // Scenario 3: Paid event received for an already cancelled subscription, but the event date is not after the cancellation.
+        // This might be a late-arriving confirmation for a period already covered by the previous subscription term.
+        } else {
+             Log.i("SubscriptionClassifier", "Paid event for $serviceName (user: $userId, email ${email.id} dated ${email.date}) but current status is ${existingSubscription.status} and email date is not after recorded end date ${existingSubscription.subscriptionEndDate}. No state change action taken.")
         }
-
-        // AI sonucu yeterince güvenilir değilse, kalıplarla kontrol et
-        return determineEmailTypeFromPatterns(email)
     }
 
     /**
-     * Turkish: Kalıplara göre e-posta türünü belirler.
-     * English: Determines the email type based on patterns.
+     * Handles the logic for when a "paid_subscription_cancellation" event is detected.
+     * If an active subscription exists for the service, it's updated to "CANCELLED",
+     * and the cancellation date is recorded.
+     *
+     * @param email The [RawEmail] identified as a cancellation event.
+     * @param serviceName The name of the service for which the cancellation was detected.
+     * @param userId The identifier for the user; currently nullable and typically null.
+     *
+     * Turkish: "paid_subscription_cancellation" olayı algılandığında mantığı işler.
+     * Servis için aktif bir abonelik mevcutsa, "CANCELLED" olarak güncellenir ve iptal tarihi
+     * kaydedilir.
      */
-    private fun determineEmailTypeFromPatterns(email: RawEmail): EmailType {
-        val bodyText = email.bodySnippet ?: email.snippet ?: ""
-        val content = "${email.subject} $bodyText".lowercase()
+    private suspend fun handlePaidSubscriptionCancellation(email: RawEmail, serviceName: String, userId: String?) {
+        val existingSubscription = userSubscriptionDao.getLatestSubscriptionByServiceNameAndUserId(serviceName, userId)
 
-        // İptal kalıplarıyla kontrol et
-        for (pattern in cancelPatterns) {
-            if (pattern.containsMatchIn(content)) {
-                return EmailType.SUBSCRIPTION_CANCEL
+        // Only proceed if there's an active subscription to cancel.
+        if (existingSubscription != null && existingSubscription.status == STATUS_ACTIVE) {
+            // Sanity check: A cancellation email should not be dated before the subscription started.
+            if (email.date < existingSubscription.subscriptionStartDate) {
+                Log.w("SubscriptionClassifier", "Cancellation email for $serviceName (user: $userId, email ${email.id} dated ${email.date}) is dated before subscription start date (${existingSubscription.subscriptionStartDate}). Ignoring cancellation event.")
+                return
             }
-        }
-
-        // Başlangıç kalıplarıyla kontrol et
-        for (pattern in startPatterns) {
-            if (pattern.containsMatchIn(content)) {
-                return EmailType.SUBSCRIPTION_START
-            }
-        }
-
-        // Ödeme kalıplarıyla kontrol et
-        for (pattern in paymentPatterns) {
-            if (pattern.containsMatchIn(content)) {
-                return EmailType.PAYMENT_CONFIRMATION
-            }
-        }
-
-        // Reklam kalıplarıyla kontrol et
-        for (pattern in promotionalPatterns) {
-            if (pattern.containsMatchIn(content)) {
-                return EmailType.PROMOTIONAL_MESSAGE
-            }
-        }
-
-        return EmailType.UNKNOWN
-    }
-
-    /**
-     * Turkish: Abonelik türünü belirler.
-     * English: Determines the subscription type.
-     */
-    private fun determineSubscriptionType(
-        subscriptionResult: ClassificationResult,
-        paidSubscriptionResult: ClassificationResult
-    ): SubscriptionType {
-        // Önce ücretli abonelik kontrolü
-        if (paidSubscriptionResult.label == "paid_subscription" && paidSubscriptionResult.score > 0.65f) {
-            return SubscriptionType.PAID
-        }
-
-        // Sonra genel abonelik türü kontrolü
-        return when (subscriptionResult.label) {
-            "paid_subscription" -> SubscriptionType.PAID
-            "free_subscription" -> SubscriptionType.FREE
-            "promotional" -> SubscriptionType.PROMOTIONAL
-            "not_subscription" -> SubscriptionType.NOT_SUBSCRIPTION
-            else -> SubscriptionType.UNKNOWN
+            existingSubscription.subscriptionEndDate = email.date // Cancellation date is the email's date.
+            existingSubscription.status = STATUS_CANCELLED
+            existingSubscription.lastEmailIdProcessed = email.id
+            existingSubscription.updatedAt = System.currentTimeMillis()
+            userSubscriptionDao.update(existingSubscription)
+            Log.i("SubscriptionClassifier", "Subscription cancelled for $serviceName (user: $userId) from email ${email.id} dated ${email.date}.")
+        // Scenario: No active subscription found, or it was already cancelled. Log this for information.
+        } else {
+            Log.i("SubscriptionClassifier", "Cancellation event for $serviceName (user: $userId, email ${email.id} dated ${email.date}) but no active subscription found or it was already not active. Current state: $existingSubscription")
         }
     }
 
+    // Note: prepareEmailContentForClassification, determineServiceName, extractDomain, matchesPattern,
+    // and capitalizeWords are kept as they support the core logic (especially service name determination).
+    // Their own KDocs are assumed to be sufficient unless specific changes were requested for them.
+
     /**
-     * E-posta içeriğini sınıflandırma için hazırlar
+     * Prepares the email content for AI classification by combining subject, sender, and body/snippet.
+     *
+     * Turkish: E-posta içeriğini, konu, gönderen ve gövde/kısa içerik bilgilerini birleştirerek
+     * AI sınıflandırması için hazırlar.
      */
     private fun prepareEmailContentForClassification(email: RawEmail): String {
         val bodyContent = when {
             email.bodySnippet != null -> email.bodySnippet
             email.snippet != null -> email.snippet
-            else -> email.bodyPlainText.take(500)
+            else -> email.bodyPlainText.take(500) // Use a portion of plain text body as a fallback.
         }
         return "Subject: ${email.subject}\nFrom: ${email.from}\nContent: $bodyContent"
     }
 
     /**
-     * E-posta için servis adını belirler
+     * Determines the service name for a given email.
+     * It first tries to match the email against a list of reliable [SubscriptionPatternEntity]s.
+     * If no pattern matches, it falls back to [extractGeneralServiceName] for heuristic-based extraction.
+     *
+     * Turkish: Verilen bir e-posta için servis adını belirler.
+     * Önce e-postayı güvenilir [SubscriptionPatternEntity] listesiyle eşleştirmeye çalışır.
+     * Eğer hiçbir kalıp eşleşmezse, sezgisel tabanlı çıkarma için [extractGeneralServiceName]'e geri döner.
      */
     private fun determineServiceName(email: RawEmail, patterns: List<SubscriptionPatternEntity>): String {
-        // Önce kalıplarla eşleşmeyi dene
+        // Attempt to match with predefined patterns first.
         for (pattern in patterns) {
             if (matchesPattern(email, pattern)) {
                 return pattern.serviceName
             }
         }
-
-        // Kalıplarla eşleşmediyse, domain adından tahmin et
+        // Fallback to general service name extraction if no pattern matches.
         return extractGeneralServiceName(email.from, email.subject, email.bodySnippet)
     }
 
     /**
-     * E-posta adresinden domain adını çıkarır
+     * Extracts the domain from an email address.
+     * Helper for [extractGeneralServiceName].
+     *
+     * Turkish: Bir e-posta adresinden alan adını çıkarır.
+     * [extractGeneralServiceName] için yardımcıdır.
      */
     private fun extractDomain(emailAddress: String): String? {
         val domainMatch = Regex("@([a-zA-Z0-9.-]+)").find(emailAddress)
         return domainMatch?.groupValues?.get(1)
     }
 
+    /**
+     * Checks if an email matches a given [SubscriptionPatternEntity].
+     * The matching logic depends on the [PatternType] defined in the pattern.
+     *
+     * Turkish: Bir e-postanın verilen bir [SubscriptionPatternEntity] ile eşleşip eşleşmediğini kontrol eder.
+     * Eşleştirme mantığı, kalıpta tanımlanan [PatternType]'a bağlıdır.
+     */
     private fun matchesPattern(email: RawEmail, pattern: SubscriptionPatternEntity): Boolean {
         val bodyText = when {
             email.bodySnippet != null -> email.bodySnippet
             email.snippet != null -> email.snippet
-            else -> ""
+            else -> "" // Ensure bodyText is not null for safe lowercasing.
         }
 
+        // Determine which part of the email to search based on the pattern type.
         val contentToSearch = when (pattern.patternType) {
             PatternType.DOMAIN -> email.from.lowercase()
             PatternType.SENDER_EMAIL -> email.from.lowercase()
             PatternType.SUBJECT_KEYWORD -> email.subject.lowercase()
-
-            PatternType.BODY_KEYWORD -> bodyText!!.lowercase()
+            PatternType.BODY_KEYWORD -> bodyText.lowercase()
             PatternType.COMBINED, PatternType.UNKNOWN -> "${email.from} ${email.subject} $bodyText".lowercase()
-            else -> {
-                Log.w("SubscriptionClassifier", "Unknown pattern type: ${pattern.patternType} for pattern ID: ${pattern.id}. Defaulting to full content search.")
-                "${email.from} ${email.subject} $bodyText".lowercase()
-            }
         }
         return try {
-            // Regex'in başında ve sonunda .* ekleyerek kısmi eşleşmelere izin verelim (eğer pattern zaten bunu içermiyorsa)
-            // Ancak bu, regex'lerin nasıl yazıldığına bağlı. Eğer regex'ler zaten tam eşleşme içinse bu gereksiz.
-            // Şimdilik orijinal haliyle bırakıyorum.
             val regex = Regex(pattern.regexPattern, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
             regex.containsMatchIn(contentToSearch)
         } catch (e: PatternSyntaxException) {
@@ -429,289 +265,48 @@ class SubscriptionClassifier @Inject constructor(
             false
         }
     }
-
-    // Bu fonksiyon, verilen kalıpların hepsi abonelik kalıbıysa (isSubscription=true) çağrılmalı.
-    private fun applyAndCollectSubscriptionPatterns(
-        emails: List<RawEmail>,
-        subscriptionPatterns: List<SubscriptionPatternEntity>,
-        collector: MutableMap<String, MutableList<ClassifiedEmail>>
-    ): MutableList<RawEmail> {
-        val remaining = mutableListOf<RawEmail>()
-        emails.forEach { email ->
-            var matched = false
-            for (pattern in subscriptionPatterns) {
-                // Bu fonksiyona gelen tüm pattern'ların isSubscription = true olduğunu varsayıyoruz.
-                if (matchesPattern(email, pattern)) {
-                    val detail = ClassifiedEmail(
-                        rawEmail = email,
-                        identifiedService = pattern.serviceName,
-                        isLikelySubscription = true, // Çünkü bunlar abonelik kalıpları
-                        matchedPatternId = pattern.id
-                    )
-                    collector.getOrPut(pattern.serviceName) { mutableListOf() }.add(detail)
-                    Log.d("SubscriptionClassifier", "Email ID ${email.id} (Sub: ${email.subject.take(20)}) matched SUB pattern: '${pattern.serviceName}'. Added to collector.")
-                    matched = true
-                    break // Bu e-posta için kalıp bulundu
-                }
-            }
-            if (!matched) {
-                remaining.add(email)
-            }
-        }
-        return remaining
-    }
-
+    
     /**
-     * Turkish: Sınıflandırılmış e-postalardan abonelik öğelerini oluşturur.
-     * English: Creates subscription items from classified emails.
+     * Extracts a general service name from email fields (sender, subject, snippet) using heuristics.
+     * This is a fallback mechanism if pattern-based matching in [determineServiceName] fails.
+     * It tries to find a plausible service name from the sender's display name, subject keywords, or domain parts.
+     *
+     * Turkish: E-posta alanlarından (gönderen, konu, kısa içerik) sezgisel yöntemler kullanarak genel bir servis adı çıkarır.
+     * Bu, [determineServiceName]'deki kalıp tabanlı eşleştirme başarısız olursa kullanılan bir geri dönüş mekanizmasıdır.
+     * Gönderenin görünen adından, konu anahtar kelimelerinden veya alan adı bölümlerinden makul bir servis adı bulmaya çalışır.
      */
-    private suspend fun createSubscriptionItemsFromDetails(
-        classifiedEmailDetails: Map<String, List<ClassifiedEmail>>
-    ): List<SubscriptionItem> = coroutineScope {
-        val resultList = mutableListOf<SubscriptionItem>()
-        Log.d("SubscriptionClassifier", "Creating items from ${classifiedEmailDetails.size} identified services.")
-
-        classifiedEmailDetails.forEach { (serviceName, detailsForService) ->
-            // Bu servise ait tüm ham e-postaları al.
-            val subscriptionRelatedRawEmails = detailsForService.map { it.rawEmail }.distinctBy { it.id }
-
-            if (subscriptionRelatedRawEmails.isEmpty()) {
-                Log.w("SubscriptionClassifier", "No raw emails for service: $serviceName after map. This shouldn't happen if detailsForService is not empty.")
-                return@forEach
-            }
-
-            // E-postaları tarih sırasına göre sırala (en yeniden en eskiye)
-            val sortedRawEmails = subscriptionRelatedRawEmails.sortedByDescending { it.date }
-            val lastEmailDate = sortedRawEmails.first().date
-            val emailCount = sortedRawEmails.size
-            val relatedEmailIds = sortedRawEmails.map { it.id }
-
-            // Sınıflandırılmış e-postaları tarih sırasına göre sırala (en yeniden en eskiye)
-            val sortedClassifiedEmails = detailsForService.sortedByDescending { it.rawEmail.date }
-
-            var subscriptionStartDate: Long? = null
-            var latestCancellationDate: Long? = null
-            var latestRenewalDate: Long? = null
-            var latestPaymentDate: Long? = null
-            var latestActivityDate = 0L
-            var isPaidSubscription = false
-
-            // Her e-posta için abonelik durumunu kontrol et
-            for (classifiedEmail in sortedClassifiedEmails) {
-                val email = classifiedEmail.rawEmail
-                val emailType = classifiedEmail.emailType
-
-                // E-posta türüne göre işlem yap
-                when (emailType) {
-                    EmailType.SUBSCRIPTION_START -> {
-                        // En eski başlangıç tarihini bul
-                        if (subscriptionStartDate == null || email.date < subscriptionStartDate) {
-                            subscriptionStartDate = email.date
-                            Log.d("SubscriptionClassifier", "Found subscription start date for $serviceName: ${email.date}")
-                        }
-
-                        // Aktivite tarihini güncelle
-                        if (email.date > latestActivityDate) {
-                            latestActivityDate = email.date
-                        }
-                    }
-                    EmailType.SUBSCRIPTION_CANCEL -> {
-                        // En yeni iptal tarihini bul
-                        if (latestCancellationDate == null || email.date > latestCancellationDate) {
-                            latestCancellationDate = email.date
-                            Log.d("SubscriptionClassifier", "Found subscription cancellation date for $serviceName: ${email.date}")
-                        }
-                    }
-                    EmailType.SUBSCRIPTION_RENEWAL -> {
-                        // En yeni yenileme tarihini bul
-                        if (latestRenewalDate == null || email.date > latestRenewalDate) {
-                            latestRenewalDate = email.date
-                            Log.d("SubscriptionClassifier", "Found subscription renewal date for $serviceName: ${email.date}")
-                        }
-
-                        // Aktivite tarihini güncelle
-                        if (email.date > latestActivityDate) {
-                            latestActivityDate = email.date
-                        }
-                    }
-                    EmailType.PAYMENT_CONFIRMATION -> {
-                        // En yeni ödeme tarihini bul
-                        if (latestPaymentDate == null || email.date > latestPaymentDate) {
-                            latestPaymentDate = email.date
-                            Log.d("SubscriptionClassifier", "Found payment confirmation date for $serviceName: ${email.date}")
-                        }
-
-                        // Aktivite tarihini güncelle
-                        if (email.date > latestActivityDate) {
-                            latestActivityDate = email.date
-                        }
-
-                        // Ücretli abonelik olarak işaretle
-                        isPaidSubscription = true
-                    }
-                    EmailType.WELCOME_MESSAGE -> {
-                        // Başlangıç tarihi yoksa, hoşgeldiniz mesajını başlangıç tarihi olarak kullan
-                        if (subscriptionStartDate == null) {
-                            subscriptionStartDate = email.date
-                            Log.d("SubscriptionClassifier", "Using welcome message as subscription start date for $serviceName: ${email.date}")
-                        }
-
-                        // Aktivite tarihini güncelle
-                        if (email.date > latestActivityDate) {
-                            latestActivityDate = email.date
-                        }
-                    }
-                    else -> {
-                        // Diğer e-posta türleri için aktivite tarihini güncelle
-                        if (email.date > latestActivityDate) {
-                            latestActivityDate = email.date
-                        }
-                    }
-                }
-
-                // Ücretli abonelik kontrolü
-                if (classifiedEmail.isPaidSubscription) {
-                    isPaidSubscription = true
-                }
-            }
-
-            // Fallback: Eğer hiçbir e-posta türü belirlenemezse, eski yöntemi kullan
-            if (latestActivityDate == 0L) {
-                for (email in sortedRawEmails) {
-                    try {
-                        val emailContent = prepareEmailContentForClassification(email)
-                        val statusResult = huggingFaceRepository.classifySubscriptionStatus(emailContent)
-
-                        when (statusResult.label) {
-                            "subscription_start" -> {
-                                if (subscriptionStartDate == null || email.date < subscriptionStartDate) {
-                                    subscriptionStartDate = email.date
-                                }
-                            }
-                            "subscription_cancel" -> {
-                                if (latestCancellationDate == null || email.date > latestCancellationDate) {
-                                    latestCancellationDate = email.date
-                                }
-                            }
-                            "subscription_renewal" -> {
-                                if (latestRenewalDate == null || email.date > latestRenewalDate) {
-                                    latestRenewalDate = email.date
-                                }
-                                if (email.date > latestActivityDate) {
-                                    latestActivityDate = email.date
-                                }
-                            }
-                            "payment_confirmation" -> {
-                                if (latestPaymentDate == null || email.date > latestPaymentDate) {
-                                    latestPaymentDate = email.date
-                                }
-                                if (email.date > latestActivityDate) {
-                                    latestActivityDate = email.date
-                                }
-                                isPaidSubscription = true
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e("SubscriptionClassifier", "Error in fallback classification: ${e.message}", e)
-                    }
-                }
-            }
-
-            // En son aktivite tarihini belirle
-            if (latestRenewalDate != null && (latestActivityDate == 0L || latestRenewalDate > latestActivityDate)) {
-                latestActivityDate = latestRenewalDate
-            }
-
-            if (latestPaymentDate != null && (latestActivityDate == 0L || latestPaymentDate > latestActivityDate)) {
-                latestActivityDate = latestPaymentDate
-            }
-
-            if (latestActivityDate == 0L && sortedRawEmails.isNotEmpty()) {
-                latestActivityDate = lastEmailDate
-            }
-
-            // Abonelik durumunu belirle
-            val status: SubscriptionStatus
-            if (latestCancellationDate != null) {
-                // İptal tarihi varsa, son aktivite tarihine göre kontrol et
-                if (latestActivityDate > latestCancellationDate ||
-                    (latestRenewalDate != null && latestRenewalDate > latestCancellationDate) ||
-                    (latestPaymentDate != null && latestPaymentDate > latestCancellationDate)) {
-                    // İptal sonrası aktivite varsa, aktif olarak işaretle
-                    status = SubscriptionStatus.ACTIVE
-                } else {
-                    // İptal sonrası aktivite yoksa, iptal edilmiş olarak işaretle
-                    status = SubscriptionStatus.CANCELLED
-                }
-            } else {
-                // İptal tarihi yoksa, son aktivite tarihine göre kontrol et
-                val timeSinceLastActivity = System.currentTimeMillis() - latestActivityDate
-                status = if (latestActivityDate > 0 && timeSinceLastActivity > inactivityThresholdMillis) {
-                    // Son aktivite üzerinden belirli bir süre geçmişse, unutulmuş olarak işaretle
-                    SubscriptionStatus.FORGOTTEN
-                } else {
-                    // Son aktivite yakın zamandaysa, aktif olarak işaretle
-                    SubscriptionStatus.ACTIVE
-                }
-            }
-
-            Log.i("SubscriptionClassifier", "FINAL ITEM for '$serviceName': Status=$status, Count=$emailCount, " +
-                    "LastEmailDate=$lastEmailDate, StartDate=$subscriptionStartDate, CancelDate=$latestCancellationDate, " +
-                    "LastActivity=$latestActivityDate, IsPaid=$isPaidSubscription")
-
-            resultList.add(
-                SubscriptionItem(
-                    serviceName = serviceName,
-                    emailCount = emailCount,
-                    lastEmailDate = lastEmailDate,
-                    status = status,
-                    cancellationDate = if (status == SubscriptionStatus.CANCELLED) latestCancellationDate else null,
-                    relatedEmailIds = relatedEmailIds,
-                    subscriptionStartDate = subscriptionStartDate
-                )
-            )
-        }
-
-        // Önce iptal edilmemiş abonelikleri, sonra en son e-posta tarihine göre sırala
-        return@coroutineScope resultList.sortedWith(
-            compareByDescending<SubscriptionItem> { it.status != SubscriptionStatus.CANCELLED }
-                .thenByDescending { it.lastEmailDate }
-        )
-    }
-
     private fun extractGeneralServiceName(from: String, subject: String, bodySnippet: String?): String {
-        val domainMatch = Regex("@([a-zA-Z0-9.-]+)").find(from)
-        var serviceNameFromDomainPart = domainMatch?.groupValues?.get(1)?.substringBeforeLast(".")?.substringAfterLast(".")
-        if (serviceNameFromDomainPart != null && serviceNameFromDomainPart.length < 3 && domainMatch?.groupValues?.get(1)?.contains(".") == true) {
-            serviceNameFromDomainPart = domainMatch.groupValues[1].substringBeforeLast(".")
-        }
-
+        // Attempt to extract from sender's display name (part before '<').
         var serviceNameFromSenderDisplayName = from.substringBefore('<').trim().removeSurrounding("\"")
         if (serviceNameFromSenderDisplayName.contains("@") || serviceNameFromSenderDisplayName.length > 30 || serviceNameFromSenderDisplayName.isEmpty() || serviceNameFromSenderDisplayName.length < 3) {
-            serviceNameFromSenderDisplayName = ""
+            serviceNameFromSenderDisplayName = "" // Invalidate if it looks like an email or is too long/short.
         }
 
-        val subjectKeywords = subject.split(Regex("[^a-zA-Z0-9İıÖöÜüÇçŞşĞğ]+"))
-            .filter { it.length in 4..20 && it.firstOrNull()?.isLetter() == true && it.first().isUpperCase() && !it.matches(Regex("^[A-ZİÖÜüÇŞĞ]+$")) }
-            .distinct()
-
+        // Common words/domains to avoid mistaking as service names.
         val commonDomainsToAvoidAsName = listOf("google", "googlemail", "gmail", "facebook", "microsoft", "apple", "amazon", "yahoo", "outlook", "hotmail", "support", "info", "noreply", "service", "team", "mail", "email", "com", "newsletter", "update", "alert", "bildirim", "duyuru", "haber", "mailchimp", "sendgrid")
 
         if (serviceNameFromSenderDisplayName.isNotBlank() && !commonDomainsToAvoidAsName.any { serviceNameFromSenderDisplayName.lowercase().contains(it) }) {
             return serviceNameFromSenderDisplayName.capitalizeWords()
         }
-
+        
+        // Attempt to extract from capitalized keywords in the subject.
+        val subjectKeywords = subject.split(Regex("[^a-zA-Z0-9İıÖöÜüÇçŞşĞğ]+"))
+            .filter { it.length in 4..20 && it.firstOrNull()?.isLetter() == true && it.first().isUpperCase() && !it.matches(Regex("^[A-ZİÖÜüÇŞĞ]+$")) }
+            .distinct()
         if (subjectKeywords.isNotEmpty()) {
             val bestSubjectKeyword = subjectKeywords.firstOrNull { keyword -> !commonDomainsToAvoidAsName.any { keyword.lowercase().contains(it) } }
             if (bestSubjectKeyword != null) {
                 return bestSubjectKeyword.capitalizeWords()
             }
         }
-
+        
+        // Attempt to extract from email domain parts.
+        val domainMatch = Regex("@([a-zA-Z0-9.-]+)").find(from)
         val fullDomain = domainMatch?.groupValues?.get(1)
         if (fullDomain != null) {
             val parts = fullDomain.split('.')
             if (parts.isNotEmpty()) {
+                // Try to get a meaningful part of the domain, avoiding generic TLDs or common service provider domains.
                 val potentialNameFromDomain = if (parts.size > 1 && commonDomainsToAvoidAsName.contains(parts.getOrNull(parts.size - 2)?.lowercase())) {
                     if (parts.size > 2 && !commonDomainsToAvoidAsName.contains(parts.getOrNull(parts.size - 3)?.lowercase())) parts.getOrNull(parts.size - 3) else parts.firstOrNull()
                 } else {
@@ -721,25 +316,31 @@ class SubscriptionClassifier @Inject constructor(
                     return potentialNameFromDomain.capitalizeWords()
             }
         }
-        return serviceNameFromDomainPart?.capitalizeWords()?.takeIf { it.isNotBlank() && !commonDomainsToAvoidAsName.contains(it.lowercase()) } ?: "Unknown Service"
-    }
-
-    private fun isPotentiallyReliableSenderForHeuristics(from: String): Boolean {
-        val lowerFrom = from.lowercase()
-        if (listOf("gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "yandex.com").any { lowerFrom.contains(it) }) {
-            return listOf("no-reply", "noreply", "support", "billing", "account", "service", "team", "info", "do_not_reply", "customer").any { lowerFrom.substringBefore('@').contains(it) }
+        
+        // Fallback to a less specific part of the domain if still nothing.
+        var serviceNameFromDomainPart = domainMatch?.groupValues?.get(1)?.substringBeforeLast(".")?.substringAfterLast(".")
+        if (serviceNameFromDomainPart != null && serviceNameFromDomainPart.length < 3 && fullDomain?.contains(".") == true) { // if domain is like "example.co.uk", try "example"
+            serviceNameFromDomainPart = fullDomain.substringBeforeLast(".") 
+            if(serviceNameFromDomainPart.contains(".")) serviceNameFromDomainPart = serviceNameFromDomainPart.substringAfterLast(".") // if "news.example", take "example"
         }
-        return true
+        return serviceNameFromDomainPart?.capitalizeWords()?.takeIf { it.isNotBlank() && !commonDomainsToAvoidAsName.contains(it.lowercase()) } ?: "Unknown Service" // Default if all else fails.
     }
 }
 
+/**
+ * Extension function to capitalize each word in a string.
+ * E.g., "hello world" becomes "Hello World".
+ *
+ * Turkish: Bir stringteki her kelimenin ilk harfini büyük yapar.
+ * Örneğin, "hello world" -> "Hello World".
+ */
 fun String.capitalizeWords(): String = this.split(Regex("\\s+")).joinToString(" ") { word ->
     if (word.isEmpty()) {
         ""
     } else {
         word.replaceFirstChar { char ->
             if (char.isLowerCase()) {
-                char.titlecase()
+                char.titlecase() // More locale-aware than toUpperCase() for the first char.
             } else {
                 char.toString()
             }

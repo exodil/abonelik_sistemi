@@ -9,7 +9,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.*
 import com.example.abonekaptanmobile.auth.GoogleAuthManager
+import com.example.abonekaptanmobile.data.local.dao.UserSubscriptionDao
 import com.example.abonekaptanmobile.data.local.entity.FeedbackEntity
+import com.example.abonekaptanmobile.data.local.entity.UserSubscriptionEntity
 import com.example.abonekaptanmobile.data.repository.FeedbackRepository
 import com.example.abonekaptanmobile.data.repository.GmailRepository
 import com.example.abonekaptanmobile.model.RawEmail
@@ -33,7 +35,8 @@ class MainViewModel @Inject constructor(
     private val googleAuthManager: GoogleAuthManager,
     private val gmailRepository: GmailRepository,
     private val subscriptionClassifier: SubscriptionClassifier,
-    private val feedbackRepository: FeedbackRepository
+    private val feedbackRepository: FeedbackRepository,
+    private val userSubscriptionDao: UserSubscriptionDao // Injected UserSubscriptionDao
 ) : ViewModel() {
 
     private val _isSigningIn = MutableStateFlow(false)
@@ -52,10 +55,10 @@ class MainViewModel @Inject constructor(
     val error: StateFlow<String?> = _error.asStateFlow()
 
     init {
-        Log.d("MainViewModel", "ViewModel init block started. Is signed in: ${_isSignedIn.value}") // YENİ LOG
+        Log.d("MainViewModel", "ViewModel init block started. Is signed in: ${_isSignedIn.value}")
         if (_isSignedIn.value) {
-            Log.d("MainViewModel", "User already signed in on init, loading subscriptions.") // YENİ LOG
-            loadSubscriptions()
+            Log.d("MainViewModel", "User already signed in on init, calling classifyAndRefreshDb.")
+            classifyAndRefreshDb() // Changed to new orchestration method
         }
         scheduleFeedbackWorker()
     }
@@ -72,10 +75,10 @@ class MainViewModel @Inject constructor(
         try {
             val account = task?.getResult(ApiException::class.java)
             if (account != null) {
-                Log.i("MainViewModel", "Google Sign-In successful for account: ${account.email}") // YENİ LOG
+                Log.i("MainViewModel", "Google Sign-In successful for account: ${account.email}")
                 googleAuthManager.updateCurrentAccount(account)
                 _isSignedIn.value = true
-                loadSubscriptions()
+                classifyAndRefreshDb() // Changed to new orchestration method
             } else {
                 _isSignedIn.value = false
                 _error.value = "Google Sign-In failed: Account is null."
@@ -112,53 +115,152 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun loadSubscriptions() {
+    /**
+     * Orchestrates the process of fetching emails, classifying them for subscription lifecycle events,
+     * updating the local database with these events, and then refreshing the UI by loading
+     * subscription data from the database.
+     * This function should be called when a full refresh of subscription data is needed,
+     * for example, after initial sign-in or when the user requests a manual refresh.
+     * It manages the `isLoading` state for the overall operation.
+     *
+     * Turkish: E-postaların getirilmesi, abonelik yaşam döngüsü olayları için sınıflandırılması,
+     * bu olaylarla yerel veritabanının güncellenmesi ve ardından veritabanından abonelik
+     * verilerini yükleyerek kullanıcı arayüzünün yenilenmesi sürecini yönetir.
+     * Bu işlev, örneğin ilk oturum açmadan sonra veya kullanıcı manuel yenileme istediğinde,
+     * abonelik verilerinin tam olarak yenilenmesi gerektiğinde çağrılmalıdır.
+     * Genel işlem için `isLoading` durumunu yönetir.
+     */
+    fun classifyAndRefreshDb() {
         if (!_isSignedIn.value) {
-            Log.d("MainViewModel", "loadSubscriptions called but user not signed in. Skipping.") // YENİ LOG
+            Log.d("MainViewModel", "classifyAndRefreshDb called but user not signed in. Skipping.")
             return
         }
 
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
-            Log.i("MainViewModel", "Loading subscriptions...") // YENİ LOG
+            Log.i("MainViewModel", "Starting email classification and DB refresh...")
             try {
+                // Step 1: Fetch emails (max 300 for now, can be configured)
                 val rawEmails = gmailRepository.fetchEmails(maxTotalEmails = 300)
-                Log.d("MainViewModel", "Fetched ${rawEmails.size} raw emails from GmailRepository.") // YENİ LOG
+                Log.d("MainViewModel", "Fetched ${rawEmails.size} raw emails from GmailRepository.")
 
+                // Prepare emails (e.g., ensure snippets are populated)
                 val emailsWithSnippets = rawEmails.map { email ->
                     email.copy(
                         bodySnippet = email.bodySnippet ?: (email.snippet.takeIf { it.isNotBlank() } ?: email.bodyPlainText).take(250)
                     )
                 }
 
-                val finalSubscriptionItems = subscriptionClassifier.classifyEmails(emailsWithSnippets)
-                Log.d("MainViewModel", "Classifier returned ${finalSubscriptionItems.size} subscription items.") // YENİ LOG
-                _subscriptions.value = finalSubscriptionItems
+                // Step 2: Classify emails (this now writes to the DB)
+                subscriptionClassifier.classifyEmails(emailsWithSnippets)
+                Log.d("MainViewModel", "Email classification complete. DB should be updated.")
 
-                if (finalSubscriptionItems.isEmpty()) {
-                    if (rawEmails.isNotEmpty()) {
-                        _error.value = "E-postalarınız analiz edildi ancak uygun bir abonelik bulunamadı."
-                        Log.i("MainViewModel", "Emails analyzed, but no subscriptions classified.")
-                    } else {
-                        _error.value = "Abonelik bulunamadı veya e-postalar yüklenemedi. Lütfen yenileyin veya daha sonra tekrar deneyin."
-                        Log.w("MainViewModel", "No raw emails fetched, so no subscriptions found.")
-                    }
-                }
+                // Step 3: Load subscriptions from DB to update UI
+                loadUserSubscriptionsFromDb()
 
             } catch (e: Exception) {
-                Log.e("MainViewModel", "Failed to load subscriptions", e) // YENİ LOG
+                Log.e("MainViewModel", "Failed during classifyAndRefreshDb", e)
                 e.printStackTrace()
-                _error.value = "Abonelikler yüklenirken bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}"
-                _subscriptions.value = emptyList()
+                _error.value = "Abonelikler işlenirken bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}"
+                // Optionally, load from DB even if classification fails to show existing data
+                // loadUserSubscriptionsFromDb() 
             } finally {
-                _isLoading.value = false
+                _isLoading.value = false // isLoading is handled by loadUserSubscriptionsFromDb if called
             }
         }
     }
 
+    /**
+     * Loads user subscription data directly from the local database via [UserSubscriptionDao]
+     * and updates the UI state. This function is typically called after the classification
+     * process ([classifyAndRefreshDb]) has updated the database, or if a direct refresh
+     * from the database is needed without re-classifying emails.
+     * It manages the `isLoading` state specifically for this database loading operation.
+     *
+     * Turkish: Kullanıcı abonelik verilerini [UserSubscriptionDao] aracılığıyla doğrudan yerel
+     * veritabanından yükler ve kullanıcı arayüzü durumunu günceller. Bu işlev genellikle
+     * sınıflandırma süreci ([classifyAndRefreshDb]) veritabanını güncelledikten sonra veya
+     * e-postaları yeniden sınıflandırmadan doğrudan veritabanından yenileme gerektiğinde çağrılır.
+     * Özellikle bu veritabanı yükleme işlemi için `isLoading` durumunu yönetir.
+     */
+    private fun loadUserSubscriptionsFromDb() {
+        viewModelScope.launch {
+            _isLoading.value = true // Indicate loading specifically for DB fetch and UI update
+            Log.i("MainViewModel", "Loading user subscriptions from database...")
+            try {
+                // Currently fetching all subscriptions; userId is null. This can be parameterized in the future.
+                val subscriptionEntities = userSubscriptionDao.getAllSubscriptionsByUserId(null)
+                Log.d("MainViewModel", "Fetched ${subscriptionEntities.size} subscription entities from DAO.")
+                
+                _subscriptions.value = mapEntitiesToSubscriptionItems(subscriptionEntities)
+                Log.d("MainViewModel", "Transformed and updated _subscriptions StateFlow with ${subscriptionEntities.size} items.")
+
+                // If no subscriptions are found in the DB and no other error is present, set a specific message.
+                if (subscriptionEntities.isEmpty() && _error.value == null) {
+                     _error.value = "Veritabanında abonelik bulunamadı. E-postalarınızı analiz etmek için yenileyin."
+                     Log.i("MainViewModel", "No subscriptions found in the database.")
+                }
+
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to load subscriptions from database", e)
+                _error.value = "Veritabanından abonelikler yüklenirken bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}"
+                _subscriptions.value = emptyList() // Clear subscriptions on error
+            } finally {
+                _isLoading.value = false // End loading state for this operation
+            }
+        }
+    }
+    
+    /**
+     * Maps a list of [UserSubscriptionEntity] objects from the database to a list of
+     * [SubscriptionItem] objects suitable for UI display.
+     *
+     * Key mapping logic:
+     * - `UserSubscriptionEntity.status` ("ACTIVE", "CANCELLED") is mapped to [SubscriptionStatus] enum.
+     * - `SubscriptionItem.lastEmailDate` is derived from `entity.lastActiveConfirmationDate` for active
+     *   subscriptions, or `entity.subscriptionEndDate` (or `entity.updatedAt` as fallback) for cancelled ones.
+     * - Placeholders are used for `emailCount` (set to 0) and `relatedEmailIds` (set to emptyList),
+     *   as these are not directly available from `UserSubscriptionEntity` in this context.
+     *
+     * @param entities The list of [UserSubscriptionEntity] to transform.
+     * @return A list of [SubscriptionItem] for UI display.
+     *
+     * Turkish: Veritabanından alınan [UserSubscriptionEntity] nesnelerinin bir listesini,
+     * kullanıcı arayüzü gösterimi için uygun [SubscriptionItem] nesnelerinin bir listesine eşler.
+     *
+     * Temel eşleme mantığı:
+     * - `UserSubscriptionEntity.status` ("ACTIVE", "CANCELLED"), [SubscriptionStatus] enum'una eşlenir.
+     * - `SubscriptionItem.lastEmailDate`, aktif abonelikler için `entity.lastActiveConfirmationDate`'ten
+     *   veya iptal edilenler için `entity.subscriptionEndDate`'ten (veya geri dönüş olarak `entity.updatedAt`) türetilir.
+     * - `emailCount` (0 olarak ayarlanır) ve `relatedEmailIds` (boş liste olarak ayarlanır) için yer tutucular
+     *   kullanılır, çünkü bunlar bu bağlamda `UserSubscriptionEntity`'den doğrudan mevcut değildir.
+     */
+    private fun mapEntitiesToSubscriptionItems(entities: List<UserSubscriptionEntity>): List<SubscriptionItem> {
+        return entities.map { entity ->
+            val subStatus = when (entity.status) {
+                "ACTIVE" -> SubscriptionStatus.ACTIVE
+                "CANCELLED" -> SubscriptionStatus.CANCELLED
+                else -> {
+                    Log.w("MainViewModel", "Unknown status found in UserSubscriptionEntity: ${entity.status} for service ${entity.serviceName}. Defaulting to UNKNOWN.")
+                    SubscriptionStatus.UNKNOWN 
+                }
+            }
+
+            SubscriptionItem(
+                serviceName = entity.serviceName,
+                emailCount = 0, // Placeholder: Not directly available from UserSubscriptionEntity.
+                lastEmailDate = if (subStatus == SubscriptionStatus.CANCELLED) entity.subscriptionEndDate ?: entity.updatedAt else entity.lastActiveConfirmationDate,
+                status = subStatus,
+                cancellationDate = if (subStatus == SubscriptionStatus.CANCELLED) entity.subscriptionEndDate else null,
+                relatedEmailIds = emptyList(), // Placeholder: Not directly available from UserSubscriptionEntity.
+                subscriptionStartDate = entity.subscriptionStartDate
+            )
+        }
+    }
+
     fun submitFeedback(serviceName: String, originalStatus: SubscriptionStatus, feedbackLabel: String, note: String?) {
-        Log.d("MainViewModel", "submitFeedback called for $serviceName, label: $feedbackLabel") // YENİ LOG
+        Log.d("MainViewModel", "submitFeedback called for $serviceName, label: $feedbackLabel")
         viewModelScope.launch {
             try {
                 val feedback = FeedbackEntity(
