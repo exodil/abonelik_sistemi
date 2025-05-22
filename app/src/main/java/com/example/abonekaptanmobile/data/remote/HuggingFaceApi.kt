@@ -17,7 +17,7 @@ interface HuggingFaceApi {
      * Turkish: Zero-shot sınıflandırma için Hugging Face API'sine istek gönderir.
      * English: Sends a request to Hugging Face API for zero-shot classification.
      */
-    @POST("models/facebook/bart-large-mnli")
+    @POST("models/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli")
     suspend fun classifyText(
         @Header("Authorization") authToken: String,
         @Body request: HuggingFaceRequest

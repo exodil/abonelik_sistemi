@@ -150,7 +150,6 @@ class MainViewModel @Inject constructor(
             _progressMessage.value = "İşlem başlıyor: E-postalar taranacak..."
             Log.i("MainViewModel", "Starting email classification and DB refresh...")
             try {
-        fix/subscription-detection-improv
                 // Step 1: Fetch emails
                 _progressMessage.value = "E-posta tarama başlatılıyor..." // Initial message for fetching
                 _progressPercentage.value = 0 // Initial percentage for fetching
@@ -167,29 +166,18 @@ class MainViewModel @Inject constructor(
                         _progressMessage.value = "E-postalar taranıyor: $fetchedCount / $totalToFetch"
                     }
                 )
-
-                // Step 1: Fetch emails (max 300 for now, can be configured)
-                //val rawEmails = gmailRepository.fetchEmails(maxTotalEmails = 1000)
-//feat/ai-subscription-lifecycle
-                //Log.d("MainViewModel", "Fetched ${rawEmails.size} raw emails from GmailRepository.")
+                Log.d("MainViewModel", "Fetched ${rawEmails.size} raw emails from GmailRepository.")
                 // After fetching is complete, progress should ideally be at 25% from the callback.
                 // Set message for next phase.
-                //_progressPercentage.value = 25 // Ensure it's at least 25%
-                //_progressMessage.value = "E-postalar alındı (${rawEmails.size} adet). Sınıflandırma başlıyor..."
-
-                // Prepare emails (e.g., ensure snippets are populated)
-                //val emailsWithSnippets = rawEmails.map { email ->
-                  //  email.copy(
-                    //    bodySnippet = email.bodySnippet ?: (email.snippet.takeIf { it.isNotBlank() } ?: email.bodyPlainText).take(250)
-                    //)
-                //}
+                _progressPercentage.value = 25 // Ensure it's at least 25%
+                _progressMessage.value = "E-postalar alındı (${rawEmails.size} adet). Sınıflandırma başlıyor..."
 
                 // Step 2: Classify emails (this now writes to the DB)
-                if (emailsWithSnippets.isNotEmpty()) {
+                if (rawEmails.isNotEmpty()) { // Changed from emailsWithSnippets to rawEmails
                     // _progressPercentage.value is already 25 at this point.
-                    _progressMessage.value = "E-postalar alındı (${emailsWithSnippets.size} adet). Sınıflandırma başlıyor..."
+                    _progressMessage.value = "E-postalar alındı (${rawEmails.size} adet). Sınıflandırma başlıyor..." // Changed from emailsWithSnippets to rawEmails
                     subscriptionClassifier.classifyEmails(
-                        allRawEmails = emailsWithSnippets,
+                        allRawEmails = rawEmails, // Changed from emailsWithSnippets to rawEmails
                         onProgress = { processedCount, totalToProcess ->
                             // Classification phase is 25% to 90% of total progress
                             val classificationProgress = if (totalToProcess > 0) {
