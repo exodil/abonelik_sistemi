@@ -31,6 +31,9 @@ import java.util.*
 @Composable
 fun SubscriptionListScreen(viewModel: MainViewModel) {
     val subscriptions by viewModel.subscriptions.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val progressPercentage by viewModel.progressPercentage.collectAsState()
+    val progressMessage by viewModel.progressMessage.collectAsState()
     var showFeedbackDialog by remember { mutableStateOf(false) }
     var selectedSubscriptionItem by remember { mutableStateOf<SubscriptionItem?>(null) }
 
@@ -58,11 +61,33 @@ fun SubscriptionListScreen(viewModel: MainViewModel) {
             }
         }
 
-        if (subscriptions.isEmpty() && !viewModel.isLoading.collectAsState().value) {
+        if (isLoading) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .weight(1f), // Allow this to take up space if list is empty
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                LinearProgressIndicator(
+                    progress = progressPercentage / 100f,
+                    modifier = Modifier.fillMaxWidth(0.8f) // Don't make it full width
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                progressMessage?.let { message ->
+                    if (message.isNotBlank()) {
+                        Text(text = message, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+
+        if (subscriptions.isEmpty() && !isLoading) {
             Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
                 Text(stringResource(R.string.no_subscriptions_found), style = MaterialTheme.typography.bodyLarge)
             }
-        } else {
+        } else if (!isLoading) { // Only show LazyColumn if not loading
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)

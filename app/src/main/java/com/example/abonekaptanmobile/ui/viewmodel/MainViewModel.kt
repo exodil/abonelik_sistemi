@@ -54,6 +54,13 @@ class MainViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    // Progress reporting StateFlows
+    private val _progressPercentage = MutableStateFlow(0)
+    val progressPercentage: StateFlow<Int> = _progressPercentage.asStateFlow()
+
+    private val _progressMessage = MutableStateFlow<String?>(null)
+    val progressMessage: StateFlow<String?> = _progressMessage.asStateFlow()
+
     init {
         Log.d("MainViewModel", "ViewModel init block started. Is signed in: ${_isSignedIn.value}")
         if (_isSignedIn.value) {
@@ -139,11 +146,31 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
+            _progressPercentage.value = 0
+            _progressMessage.value = "İşlem başlıyor: E-postalar taranacak..."
             Log.i("MainViewModel", "Starting email classification and DB refresh...")
             try {
-                // Step 1: Fetch emails (max 300 for now, can be configured)
-                val rawEmails = gmailRepository.fetchEmails(maxTotalEmails = 300)
+                // Step 1: Fetch emails
+                _progressMessage.value = "E-posta tarama başlatılıyor..." // Initial message for fetching
+                _progressPercentage.value = 0 // Initial percentage for fetching
+
+                val rawEmails = gmailRepository.fetchEmails(
+                    maxTotalEmails = 1000, // Or your configured value
+                    onProgress = { fetchedCount, totalToFetch ->
+                        val currentFetchingProgress = if (totalToFetch > 0) {
+                            (fetchedCount.toFloat() / totalToFetch.toFloat()) * 25f // Fetching is 0-25% of total
+                        } else {
+                            25f // Assume 25% if totalToFetch is 0 (e.g. no emails at all)
+                        }
+                        _progressPercentage.value = currentFetchingProgress.toInt()
+                        _progressMessage.value = "E-postalar taranıyor: $fetchedCount / $totalToFetch"
+                    }
+                )
                 Log.d("MainViewModel", "Fetched ${rawEmails.size} raw emails from GmailRepository.")
+                // After fetching is complete, progress should ideally be at 25% from the callback.
+                // Set message for next phase.
+                _progressPercentage.value = 25 // Ensure it's at least 25%
+                _progressMessage.value = "E-postalar alındı (${rawEmails.size} adet). Sınıflandırma başlıyor..."
 
                 // Prepare emails (e.g., ensure snippets are populated)
                 val emailsWithSnippets = rawEmails.map { email ->
@@ -153,20 +180,53 @@ class MainViewModel @Inject constructor(
                 }
 
                 // Step 2: Classify emails (this now writes to the DB)
-                subscriptionClassifier.classifyEmails(emailsWithSnippets)
-                Log.d("MainViewModel", "Email classification complete. DB should be updated.")
+                if (emailsWithSnippets.isNotEmpty()) {
+                    // _progressPercentage.value is already 25 at this point.
+                    _progressMessage.value = "E-postalar alındı (${emailsWithSnippets.size} adet). Sınıflandırma başlıyor..."
+                    subscriptionClassifier.classifyEmails(
+                        allRawEmails = emailsWithSnippets,
+                        onProgress = { processedCount, totalToProcess ->
+                            // Classification phase is 25% to 90% of total progress
+                            val classificationProgress = if (totalToProcess > 0) {
+                                (processedCount.toFloat() / totalToProcess.toFloat()) * 65f
+                            } else {
+                                65f // Assume full 65% if total is 0 (e.g. no emails to classify)
+                            }
+                            _progressPercentage.value = (25f + classificationProgress).toInt()
+                            _progressMessage.value = "E-postalar sınıflandırılıyor: $processedCount / $totalToProcess"
+                        }
+                    )
+                } else {
+                    // If no emails to classify, set progress as if classification part is done
+                    _progressPercentage.value = 90 // 25% (fetching) + 65% (classification) = 90%
+                    _progressMessage.value = "Sınıflandırılacak e-posta bulunmuyor. Sonraki adıma geçiliyor..."
+                }
+
+                // After classification is complete (or skipped if no emails)
+                _progressPercentage.value = 90 // Ensure it's at 90% before loading from DB
+                _progressMessage.value = "Sınıflandırma tamamlandı. Sonuçlar yükleniyor..."
 
                 // Step 3: Load subscriptions from DB to update UI
-                loadUserSubscriptionsFromDb()
+                loadUserSubscriptionsFromDb() // This function now handles the final progress update
 
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Failed during classifyAndRefreshDb", e)
                 e.printStackTrace()
                 _error.value = "Abonelikler işlenirken bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}"
+                _progressMessage.value = "Hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}"
+                _progressPercentage.value = 0
                 // Optionally, load from DB even if classification fails to show existing data
-                // loadUserSubscriptionsFromDb() 
+                // loadUserSubscriptionsFromDb()
             } finally {
-                _isLoading.value = false // isLoading is handled by loadUserSubscriptionsFromDb if called
+                // _isLoading.value = false // isLoading is handled by loadUserSubscriptionsFromDb if called
+                // Reset progress message and percentage if not already at 100% (success) or 0 (error)
+                if (_progressPercentage.value != 100 && _progressPercentage.value != 0) {
+                    _progressPercentage.value = 0
+                    _progressMessage.value = null
+                }
+                if (_isLoading.value && _progressPercentage.value != 100) { // Ensure isLoading is set to false if process didn't complete fully through loadUserSubscriptionsFromDb
+                    _isLoading.value = false
+                }
             }
         }
     }
@@ -208,10 +268,13 @@ class MainViewModel @Inject constructor(
                 _subscriptions.value = emptyList() // Clear subscriptions on error
             } finally {
                 _isLoading.value = false // End loading state for this operation
+                // Final progress update, assuming loadUserSubscriptionsFromDb is the last step
+                _progressPercentage.value = 100
+                _progressMessage.value = "İşlem tamamlandı."
             }
         }
     }
-    
+
     /**
      * Maps a list of [UserSubscriptionEntity] objects from the database to a list of
      * [SubscriptionItem] objects suitable for UI display.

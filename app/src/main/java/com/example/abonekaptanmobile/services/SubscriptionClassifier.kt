@@ -33,7 +33,7 @@ class SubscriptionClassifier @Inject constructor(
 
     companion object {
         // Confidence threshold for AI model's predictions to be considered valid.
-        private const val CONFIDENCE_THRESHOLD = 0.70f
+        private const val CONFIDENCE_THRESHOLD = 0.40f
         // Constant for active subscription status in the database.
         private const val STATUS_ACTIVE = "ACTIVE"
         // Constant for cancelled subscription status in the database.
@@ -58,11 +58,16 @@ class SubscriptionClassifier @Inject constructor(
      * olayı işlemek için [handlePaidSubscriptionEvent] veya [handlePaidSubscriptionCancellation] yardımcı
      * metotlarını çağırır.
      */
-    suspend fun classifyEmails(allRawEmails: List<RawEmail>) {
+    suspend fun classifyEmails(
+        allRawEmails: List<RawEmail>,
+        onProgress: suspend (processedCount: Int, totalToProcess: Int) -> Unit // New callback
+    ) {
         Log.i("SubscriptionClassifier", "classifyEmails - Input: ${allRawEmails.size} emails.")
 
         // Sort emails by date, newest first, to process events in chronological order.
         val sortedEmails = allRawEmails.sortedByDescending { it.date }
+        val totalToProcess = sortedEmails.size
+        var processedCount = 0
 
         // Fetch patterns for service name determination, used as a fallback or supplement to other methods.
         val allReliableSubPatterns = communityPatternRepo.getReliableSubscriptionPatterns()
@@ -72,12 +77,13 @@ class SubscriptionClassifier @Inject constructor(
             Log.w("SubscriptionClassifier", "No reliable subscription patterns found for determineServiceName. Service name identification might be less accurate.")
         }
 
-        for (email in sortedEmails) {
-            try {
-                val emailContent = prepareEmailContentForClassification(email)
-                val lifecycleResult = huggingFaceRepository.classifySubscriptionLifecycle(emailContent)
+        try {
+            for (email in sortedEmails) {
+                try {
+                    val emailContent = prepareEmailContentForClassification(email)
+                    val lifecycleResult = huggingFaceRepository.classifySubscriptionLifecycle(emailContent)
 
-                val serviceName = determineServiceName(email, allReliableSubPatterns)
+                    val serviceName = determineServiceName(email, allReliableSubPatterns)
 
                 // userId is currently null. Future enhancements could allow per-user classification.
                 val userId: String? = null
@@ -97,11 +103,19 @@ class SubscriptionClassifier @Inject constructor(
                     Log.d("SubscriptionClassifier", "Email ${email.id} for $serviceName (user: $userId) did not meet classification thresholds or was ambiguous. PaidScore: $paidEventScore, CancelScore: $cancellationScore. Labels: ${lifecycleResult.allResults.joinToString { it.label + ": " + it.score }}")
                 }
 
-            } catch (e: Exception) {
-                Log.e("SubscriptionClassifier", "Error processing email ${email.id} (Subject: ${email.subject.take(50)}) in classifyEmails: ${e.message}", e)
+                } catch (e: Exception) {
+                    Log.e("SubscriptionClassifier", "Error processing email ${email.id} (Subject: ${email.subject.take(50)}) in classifyEmails: ${e.message}", e)
+                } finally {
+                    processedCount++
+                    onProgress(processedCount, totalToProcess)
+                }
             }
+        } finally {
+            // Ensure final progress is reported, especially if loop terminated unexpectedly or completed.
+            // This also handles the case where sortedEmails is empty.
+            onProgress(processedCount, totalToProcess)
         }
-        Log.i("SubscriptionClassifier", "Finished processing ${allRawEmails.size} emails.")
+        Log.i("SubscriptionClassifier", "Finished processing $processedCount of $totalToProcess emails.")
     }
 
     /**
