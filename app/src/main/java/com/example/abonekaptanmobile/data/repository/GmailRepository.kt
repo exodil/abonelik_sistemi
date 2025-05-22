@@ -114,7 +114,7 @@ class GmailRepository @Inject constructor(private val gmailApi: GmailApi) {
                     } else {
                         Log.d("GmailRepository", "Max total emails limit reached within batch processing.")
                         limitReachedInOutermostLoop = true
-                        break 
+                        break
                     }
                 }
                 // Report progress after processing the current batch or if limit is reached
