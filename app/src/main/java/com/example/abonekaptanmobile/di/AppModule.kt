@@ -28,6 +28,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Module
@@ -44,9 +45,10 @@ object AppModule {
 
     @Singleton
     @Provides
+    @Named("GmailOkHttpClient")
     fun provideOkHttpClient(authManager: GoogleAuthManager): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor { message ->
-            Log.d("OkHttp", message)
+            Log.d("OkHttp_Gmail", message)
         }.apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
@@ -83,7 +85,7 @@ object AppModule {
 
     @Singleton
     @Provides
-    fun provideGmailApi(okHttpClient: OkHttpClient): GmailApi {
+    fun provideGmailApi(@Named("GmailOkHttpClient") okHttpClient: OkHttpClient): GmailApi {
         return Retrofit.Builder()
             .baseUrl("https://www.googleapis.com/")
             .client(okHttpClient)
@@ -145,7 +147,25 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideHuggingFaceApi(okHttpClient: OkHttpClient): HuggingFaceApi {
+    @Named("HuggingFaceOkHttpClient")
+    fun provideHuggingFaceOkHttpClient(): OkHttpClient {
+        val loggingInterceptor = HttpLoggingInterceptor { message ->
+            Log.d("OkHttp_HF", message)
+        }.apply {
+            level = HttpLoggingInterceptor.Level.BODY
+        }
+
+        return OkHttpClient.Builder()
+            .addInterceptor(loggingInterceptor)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideHuggingFaceApi(@Named("HuggingFaceOkHttpClient") okHttpClient: OkHttpClient): HuggingFaceApi {
         return Retrofit.Builder()
             .baseUrl("https://api-inference.huggingface.co/")
             .client(okHttpClient)
