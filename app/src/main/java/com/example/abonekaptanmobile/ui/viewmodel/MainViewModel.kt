@@ -170,7 +170,16 @@ class MainViewModel @Inject constructor(
                 // After fetching is complete, progress should ideally be at 25% from the callback.
                 // Set message for next phase.
                 _progressPercentage.value = 25 // Ensure it's at least 25%
-                _progressMessage.value = "E-postalar alındı (${rawEmails.size} adet). Sınıflandırma başlıyor..."
+                _progressMessage.value = "E-postalar alındı (${rawEmails.size} adet). Sınıflandırma başlıyor.
+                fix/subscription-detection-improv
+
+                // Prepare emails (e.g., ensure snippets are populated)
+                val emailsWithSnippets = rawEmails.map { email ->
+                    email.copy(
+                        bodySnippet = email.bodySnippet ?: (email.snippet.takeIf { it.isNotBlank() } ?: email.bodyPlainText).take(250)
+                    )
+                }
+
 
                 // Step 2: Classify emails (this now writes to the DB)
                 if (rawEmails.isNotEmpty()) { // Changed from emailsWithSnippets to rawEmails
