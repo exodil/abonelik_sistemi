@@ -3,243 +3,413 @@ package com.example.abonekaptanmobile.services
 
 import android.util.Log
 import com.example.abonekaptanmobile.data.repository.HuggingFaceRepository
+import com.example.abonekaptanmobile.model.CompanySubscriptionInfo
 import com.example.abonekaptanmobile.model.EmailAnalysisResult
 import com.example.abonekaptanmobile.model.RawEmail
+import com.example.abonekaptanmobile.util.CompanyListProvider
 import org.json.JSONObject
 import javax.inject.Inject
+import javax.inject.Singleton
+import java.text.Normalizer
 
 /**
  * Turkish: E-postaları abonelik durumuna göre sınıflandıran servis.
- * English: Service that classifies emails based on subscription status.
+ * English: Service that classifies emails based on subscription status using a two-stage LLM approach.
  */
+@Singleton
 class SubscriptionClassifier @Inject constructor(
-    private val huggingFaceRepository: HuggingFaceRepository
+    private val huggingFaceRepository: HuggingFaceRepository,
+    private val companyListProvider: CompanyListProvider
 ) {
-    /**
-     * Template for prompting the LLM to analyze email content for subscription information.
-     * Includes placeholders for email details (from, subject, body) and specifies the
-     * desired JSON output format with fields: company, subscription, action, date, confidence.
-     */
-    private const val PROMPT_TEMPLATE_V2 = """
-Analyze the following email content to identify subscription-related information.
-The email is from: "{email_from}"
-Subject: "{email_subject}"
-Body Snippet:
----
-{email_body}
----
+    companion object {
+        private const val TAG = "SubscriptionClassifier"
+    }
 
+    /**
+     * Prompt template for the first stage LLM call: Company Detection.
+     * Aims to identify the company name and assess if the email is likely subscription-related.
+     */
+    private const val PROMPT_TEMPLATE_COMPANY_DETECTION = """
+Analyze the following email content to identify the primary company or service mentioned and determine if it's likely related to a subscription.
+Email From: "{email_from}"
+Email Subject: "{email_subject}"
+Email Body Snippet (first 500 characters):
+---
+{email_body_snippet}
+---
 Based ONLY on the text provided, extract the following information in JSON format:
-- "company": (string) The name of the company or service the subscription is with. If not clearly identifiable, use "Unknown".
-- "subscription": (boolean) True if this email explicitly mentions a subscription service (paid or free). False otherwise (e.g. newsletters, promotions for one-time purchases, notifications not about an ongoing subscription).
-- "action": (string) The primary action related to the subscription. Choose one: "start", "renew", "cancel", "payment_reminder", "payment_issue", "trial_start", "trial_ending", "upgrade", "downgrade", "service_update", "none". If no specific action, use "none".
-- "date": (string) If a specific date for an event (e.g., start date, cancellation date, renewal date, payment date) is mentioned, provide it in YYYY-MM-DD format. If not mentioned or not applicable, use "unknown".
-- "confidence": (float) Your confidence in this analysis, from 0.0 (low) to 1.0 (high).
+- "company_name": (string) The name of the company or service. If not clearly identifiable, use "Unknown".
+- "is_likely_subscription_related": (boolean) True if the email content (subject, snippet) suggests an ongoing subscription, service agreement, account notification, or renewal. False if it seems like a one-time purchase, marketing newsletter for a product, spam, or completely unrelated.
+- "confidence_company_detection": (float) Your confidence in this company detection and likelihood assessment, from 0.0 (low) to 1.0 (high).
 
 Example JSON output:
 {
-  "company": "Netflix",
-  "subscription": true,
-  "action": "start",
-  "date": "2023-01-15",
-  "confidence": 0.9
+  "company_name": "Spotify",
+  "is_likely_subscription_related": true,
+  "confidence_company_detection": 0.85
 }
 
 Return ONLY the JSON object.
 """
 
     /**
-     * Represents the structured output expected from the LLM after analyzing an email.
-     * This data class is used for parsing the JSON response from the LLM.
-     *
-     * @property company The name of the company or service identified in the email. Nullable if not found.
-     * @property subscription Boolean indicating if the email pertains to a subscription. Nullable if not determined.
-     * @property action The primary action related to the subscription (e.g., "start", "cancel"). Nullable if not determined.
-     * @property date The date associated with the action (YYYY-MM-DD format). Nullable if not found or applicable.
-     * @property confidence The LLM's confidence score (0.0 to 1.0) in its analysis. Nullable if not provided.
+     * Prompt template for the second stage LLM call: Detail Analysis.
+     * Used if a known company is detected and the email is likely subscription-related.
+     * Aims to extract specific details about the subscription action.
      */
-    private data class LlmAnalysisOutput(
-        val company: String?,
-        val subscription: Boolean?,
-        val action: String?,
-        val date: String?,
-        val confidence: Float?
+    private const val PROMPT_TEMPLATE_DETAIL_ANALYSIS = """
+Analyze the following email content from "{company_name}" (service hint: {service_hint}) for specific subscription details.
+Email From: "{email_from}"
+Email Subject: "{email_subject}"
+Email Body (first 1500 characters):
+---
+{email_body_full}
+---
+Based ONLY on the text provided, extract the following information in JSON format:
+- "subscription": (boolean) True if this email explicitly confirms or modifies a subscription (paid or free) with "{company_name}". False otherwise.
+- "action": (string) The primary action related to the subscription with "{company_name}". Choose one: "start", "renew", "cancel", "payment_reminder", "payment_issue", "trial_start", "trial_ending", "upgrade", "downgrade", "service_update", "none". If no specific action, use "none".
+- "date": (string) If a specific date for an event (e.g., start date, cancellation date, renewal date, payment date for "{company_name}") is mentioned, provide it in YYYY-MM-DD format. If not mentioned or not applicable, use "unknown".
+- "confidence_analysis": (float) Your confidence in this detailed analysis for "{company_name}", from 0.0 (low) to 1.0 (high).
+
+Example JSON output:
+{
+  "subscription": true,
+  "action": "renew",
+  "date": "2024-03-15",
+  "confidence_analysis": 0.92
+}
+
+Return ONLY the JSON object.
+"""
+
+    /**
+     * Data class for parsing the JSON output from the first stage LLM call (Company Detection).
+     */
+    private data class LlmCompanyDetectionOutput(
+        val company_name: String?,
+        val is_likely_subscription_related: Boolean?,
+        val confidence_company_detection: Float?
     )
 
     /**
-     * Constructs the prompt string to be sent to the LLM for analyzing a given email.
-     * It injects the email's sender, subject, and body content into the [PROMPT_TEMPLATE_V2].
-     *
-     * @param email The [RawEmail] object containing the details to be included in the prompt.
-     * @return A formatted string ready to be used as a prompt for the LLM.
+     * Data class for parsing the JSON output from the second stage LLM call (Detail Analysis).
      */
-    private fun buildPrompt(email: RawEmail): String {
-        val bodyContent = when {
-            !email.bodySnippet.isNullOrBlank() -> email.bodySnippet
-            !email.snippet.isNullOrBlank() -> email.snippet
-            !email.bodyPlainText.isNullOrBlank() -> email.bodyPlainText.take(1000) // Increased limit for LLM
-            else -> ""
-        }
-        return PROMPT_TEMPLATE_V2
-            .replace("{email_from}", email.from)
-            .replace("{email_subject}", email.subject)
-            .replace("{email_body}", bodyContent.replace("\"", "\\\"")) // Escape quotes in body
-    }
+    private data class LlmDetailAnalysisOutput(
+        val subscription: Boolean?,
+        val action: String?,
+        val date: String?,
+        val confidence_analysis: Float?
+    )
+
+    private lateinit var knownCompanies: List<CompanySubscriptionInfo>
+    private var knownCompaniesInitialized: Boolean = false
 
 
     /**
-     * Processes a list of raw emails using a Large Language Model (LLM) to analyze and extract
-     * subscription-related information.
+     * Processes a list of raw emails using a two-stage Large Language Model (LLM) approach
+     * to analyze and extract subscription-related information.
      *
-     * This function iterates through each email, builds a specific prompt, sends it to the LLM,
-     * parses the JSON response, and determines a database operation (`database_op`) based on
-     * the detected action (e.g., "start", "cancel") and a history of actions for each company.
-     * The results are then compiled into a list of [EmailAnalysisResult] objects.
-     *
-     * Key steps:
-     * 1. Sorts emails by date (descending) to process recent emails first, which aids in determining
-     *    the correct `database_op` by understanding the sequence of subscription events.
-     * 2. For each email:
-     *    a. Retrieves its original index to maintain the initial order in the final output.
-     *    b. Builds a prompt using [buildPrompt].
-     *    c. Calls the LLM via `huggingFaceRepository.analyzeEmailWithInstructionModel`.
-     *    d. Parses the LLM's JSON response into an [LlmAnalysisOutput] object, handling potential errors.
-     *    e. Determines `database_op` ("CREATE_EVENT", "UPDATE_EVENT", "NONE") based on the
-     *       `action` from the LLM and the `companyActionHistory`. This logic aims to identify
-     *       new subscriptions or updates to existing ones.
-     *    f. Creates an [EmailAnalysisResult] object.
-     * 3. Logs progress and any errors encountered during processing.
-     * 4. Returns the list of [EmailAnalysisResult]s, sorted by their original email index.
+     * Stage 1: Company Detection - Identifies the company and likelihood of subscription.
+     * Stage 2: Detail Analysis - If a known company is likely, extracts specific subscription details.
      *
      * @param allRawEmails A list of [RawEmail] objects to be processed.
-     * @return A list of [EmailAnalysisResult] objects, each representing the LLM's analysis
-     *         for an email, sorted by the original index of the emails in the input list.
+     * @return A list of [EmailAnalysisResult] objects, sorted by the original email index.
      */
     suspend fun processEmailsWithLLM(allRawEmails: List<RawEmail>): List<EmailAnalysisResult> {
+        if (!knownCompaniesInitialized || !::knownCompanies.isInitialized) {
+            initializeKnownCompanies()
+        }
+
         val resultsList = mutableListOf<EmailAnalysisResult>()
-        val companyActionHistory = mutableMapOf<String, String>() // Tracks last significant action (start/cancel)
+        val companyActionHistory = mutableMapOf<String, String>() 
 
-        Log.i("SubscriptionClassifier", "Starting LLM processing for ${allRawEmails.size} emails.")
+        Log.i(TAG, "Starting new two-stage LLM processing for ${allRawEmails.size} emails.")
 
-        // Sort emails by date descending to process most recent first, which helps with action history logic
         val sortedEmails = allRawEmails.sortedByDescending { it.date }
 
         sortedEmails.forEach { email ->
-            val originalEmailIndex = allRawEmails.indexOf(email) // Get original index for later sorting
+            val originalEmailIndex = allRawEmails.indexOf(email)
             if (originalEmailIndex == -1) {
-                Log.e("SubscriptionClassifier", "Could not find original index for email ID: ${email.id}. Skipping.")
+                Log.e(TAG, "Critical error: Could not find original index for email ID ${email.id}. Skipping.")
                 return@forEach
             }
 
-            val prompt = buildPrompt(email)
-            Log.d("SubscriptionClassifier", "Processing email ID ${email.id} (Original Index: $originalEmailIndex) with LLM. Subject: ${email.subject.take(50)}")
-
-            val llmResponseString = try {
-                huggingFaceRepository.analyzeEmailWithInstructionModel(prompt)
+            // Stage 1: Company Detection
+            val companyDetectionPrompt = buildPromptForCompanyDetection(email)
+            val stage1ResponseString = try {
+                huggingFaceRepository.analyzeEmailWithInstructionModel(companyDetectionPrompt)
             } catch (e: Exception) {
-                Log.e("SubscriptionClassifier", "LLM API call failed for email ID ${email.id}: ${e.message}", e)
+                Log.e(TAG, "Stage 1 LLM API call failed for email ID ${email.id}: ${e.message}", e)
                 null
             }
 
-            var llmOutput: LlmAnalysisOutput
-            var extractedCompany = "Unknown"
-            var extractedSubscription = false
-            var extractedAction = "none"
-            var extractedDate = "unknown"
-            var extractedConfidence = 0.0f
+            val llmCompanyOutput = parseLlmCompanyDetectionOutput(stage1ResponseString)
+            val detectedCompanyName = llmCompanyOutput.company_name ?: "Unknown"
+            val isLikelySubscription = llmCompanyOutput.is_likely_subscription_related ?: false
+            val companyDetectionConfidence = llmCompanyOutput.confidence_company_detection ?: 0.0f
 
-            if (!llmResponseString.isNullOrBlank()) {
-                try {
-                    // Clean the response string if it contains markdown or other non-JSON parts
-                    val cleanedResponse = llmResponseString.substringAfter("```json\n", llmResponseString)
-                                                          .substringBeforeLast("\n```", llmResponseString)
-                                                          .trim()
+            Log.d(TAG, "Email ID ${email.id} (Index: $originalEmailIndex) - Stage 1 Output: Company='${detectedCompanyName}', LikelySub='${isLikelySubscription}', Confidence=${companyDetectionConfidence}")
 
-                    val jsonResponse = JSONObject(cleanedResponse)
-                    extractedCompany = jsonResponse.optString("company", "Unknown")
-                    extractedSubscription = jsonResponse.optBoolean("subscription", false)
-                    extractedAction = jsonResponse.optString("action", "none")
-                    extractedDate = jsonResponse.optString("date", "unknown")
-                    // optDouble can return NaN, so handle it
-                    val confidenceDouble = jsonResponse.optDouble("confidence", 0.0)
-                    extractedConfidence = if (confidenceDouble.isNaN()) 0.0f else confidenceDouble.toFloat()
+            val knownCompanyMatch = findMatchingKnownCompany(detectedCompanyName)
 
-                    llmOutput = LlmAnalysisOutput(
-                        company = extractedCompany,
-                        subscription = extractedSubscription,
-                        action = extractedAction,
-                        date = extractedDate,
-                        confidence = extractedConfidence
-                    )
-                    Log.d("SubscriptionClassifier", "LLM Response for email ID ${email.id}: $llmOutput")
-                } catch (e: org.json.JSONException) {
-                    Log.e("SubscriptionClassifier", "Failed to parse LLM JSON response for email ID ${email.id}. Response: $llmResponseString. Error: ${e.message}")
-                    llmOutput = LlmAnalysisOutput("Unknown", false, "none", "unknown", 0.0f)
-                }
+            if (!isLikelySubscription || (knownCompanyMatch == null && detectedCompanyName != "Unknown" && detectedCompanyName.isNotBlank())) {
+                val result = EmailAnalysisResult(
+                    email_index = originalEmailIndex,
+                    company = detectedCompanyName.takeIf { it.isNotBlank() } ?: "Unknown",
+                    subscription = isLikelySubscription,
+                    action = "none",
+                    date = "unknown",
+                    confidence = companyDetectionConfidence,
+                    database_op = "NONE"
+                )
+                resultsList.add(result)
+                Log.i(TAG, "Email ID ${email.id} - Stage 1 decision: Not a known/likely subscription or unknown company not matching. Result: $result")
+                return@forEach 
+            } else if (knownCompanyMatch == null && (detectedCompanyName == "Unknown" || detectedCompanyName.isBlank())) {
+                 val result = EmailAnalysisResult(
+                    email_index = originalEmailIndex,
+                    company = "Unknown",
+                    subscription = false, 
+                    action = "none",
+                    date = "unknown",
+                    confidence = companyDetectionConfidence,
+                    database_op = "NONE"
+                )
+                resultsList.add(result)
+                Log.i(TAG, "Email ID ${email.id} - Stage 1 decision: Unknown company and not likely subscription. Result: $result")
+                return@forEach
+            }
+            
+            if (knownCompanyMatch == null) {
+                 Log.e(TAG, "Email ID ${email.id} - Critical logic error: knownCompanyMatch is null after Stage 1 checks (isLikelySubscription was true and detectedCompanyName was 'Unknown' or matched no known company but was blank). Skipping to avoid crash.")
+                 resultsList.add(EmailAnalysisResult(originalEmailIndex, detectedCompanyName, isLikelySubscription, "error_logic_s2", "unknown", companyDetectionConfidence, "NONE"))
+                 return@forEach
+            }
+
+            // Stage 2: Detail Analysis
+            val actualCompanyName = knownCompanyMatch.companyName 
+            val serviceHint = knownCompanyMatch.serviceType
+
+            val detailAnalysisPrompt = buildPromptForDetailAnalysis(email, actualCompanyName, serviceHint)
+            val stage2ResponseString = try {
+                huggingFaceRepository.analyzeEmailWithInstructionModel(detailAnalysisPrompt)
+            } catch (e: Exception) {
+                Log.e(TAG, "Stage 2 LLM API call failed for email ID ${email.id}, Company='${actualCompanyName}': ${e.message}", e)
+                null
+            }
+
+            val llmDetailOutput = parseLlmDetailAnalysisOutput(stage2ResponseString)
+            Log.d(TAG, "Email ID ${email.id} - Stage 2 Output for '${actualCompanyName}': $llmDetailOutput")
+
+            val finalSubscriptionStatus = llmDetailOutput.subscription ?: false
+            val finalAction = llmDetailOutput.action ?: "none"
+            val finalDate = llmDetailOutput.date ?: "unknown"
+            val stage2Confidence = llmDetailOutput.confidence_analysis ?: 0.0f
+            
+            val finalConfidence = if (stage2Confidence > 0.01f) { 
+                (companyDetectionConfidence + stage2Confidence) / 2.0f
             } else {
-                Log.w("SubscriptionClassifier", "LLM response was null or blank for email ID ${email.id}.")
-                llmOutput = LlmAnalysisOutput("Unknown", false, "none", "unknown", 0.0f)
-                // Keep extracted variables as their default error values
+                companyDetectionConfidence 
             }
 
-            // Determine database_op
-            var currentDatabaseOp = "NONE"
-            val companyKey = extractedCompany.lowercase().trim() // Use a normalized key for history
-
-            if (companyKey.isNotBlank() && companyKey != "unknown") {
-                when (extractedAction) {
-                    "start", "trial_start" -> {
-                        if (companyActionHistory[companyKey] != "start") {
-                            currentDatabaseOp = "CREATE_EVENT"
-                            companyActionHistory[companyKey] = "start"
-                        } else {
-                             Log.d("SubscriptionClassifier", "Duplicate 'start' action for $companyKey, op: NONE.")
-                        }
-                    }
-                    "cancel" -> {
-                        if (companyActionHistory[companyKey] == "start" || companyActionHistory[companyKey] == "renew") { // Allow cancel if started or renewed
-                            currentDatabaseOp = "UPDATE_EVENT"
-                            companyActionHistory[companyKey] = "cancel"
-                        } else {
-                            Log.d("SubscriptionClassifier", "Cancel action for $companyKey without prior 'start' or 'renew', op: NONE. History: ${companyActionHistory[companyKey]}")
-                        }
-                    }
-                    "renew" -> {
-                         if (companyActionHistory[companyKey] == "start" || companyActionHistory[companyKey] == "renew") {
-                             // Renew doesn't typically change the core event in this model, but updates its activity
-                             // We can consider an UPDATE_EVENT if renewal implies a change that needs tracking (e.g. new term)
-                             // For now, let's assume it doesn't create a new DB event but confirms existing.
-                             // If it's the first 'start-like' action, treat as start.
-                             currentDatabaseOp = "NONE" // Or UPDATE_EVENT if we want to track renewals explicitly
-                             companyActionHistory[companyKey] = "renew" // Update history to show it's active
-                         } else if (companyActionHistory[companyKey] == null) {
-                             // If no history, and it's a renewal, treat as a start.
-                             currentDatabaseOp = "CREATE_EVENT"
-                             companyActionHistory[companyKey] = "start" // Treat as start as it's the first positive signal
-                             Log.d("SubscriptionClassifier", "Renewal for $companyKey with no prior history, treating as CREATE_EVENT.")
-                         }
-                    }
-                    // Other actions like "payment_reminder", "service_update" usually don't change the subscription state in DB
-                    // but might be useful for other analytics or updating last_activity_date for an event.
-                }
-            }
+            val databaseOp = determineDatabaseOp(finalAction, actualCompanyName, companyActionHistory)
 
             val analysisResult = EmailAnalysisResult(
                 email_index = originalEmailIndex,
-                company = extractedCompany,
-                subscription = extractedSubscription,
-                action = extractedAction,
-                date = extractedDate,
-                confidence = extractedConfidence,
-                database_op = currentDatabaseOp
+                company = actualCompanyName,
+                subscription = finalSubscriptionStatus,
+                action = finalAction,
+                date = finalDate,
+                confidence = String.format("%.2f", finalConfidence).toFloat(),
+                database_op = databaseOp
             )
             resultsList.add(analysisResult)
-            Log.i("SubscriptionClassifier", "Processed email ID ${email.id}: Company='${analysisResult.company}', Action='${analysisResult.action}', DB_Op='${analysisResult.database_op}'")
+            Log.i(TAG, "Email ID ${email.id} - Stage 2 Result for '${actualCompanyName}': $analysisResult")
         }
 
-        Log.i("SubscriptionClassifier", "LLM processing completed. ${resultsList.size} results generated.")
-        // Sort results by the original email index to maintain chronological order of input
+        Log.i(TAG, "New LLM processing completed. ${resultsList.size} results generated.")
         return resultsList.sortedBy { it.email_index }
     }
+
+    private suspend fun initializeKnownCompanies() {
+        if (knownCompaniesInitialized && ::knownCompanies.isInitialized && knownCompanies.isNotEmpty()) {
+            Log.d(TAG, "Known companies already initialized and not empty. Size: ${knownCompanies.size}")
+            return
+        }
+        if (knownCompaniesInitialized && ::knownCompanies.isInitialized && knownCompanies.isEmpty()){
+            Log.w(TAG, "Known companies was marked initialized but list is empty. Attempting to re-initialize.")
+        }
+
+        Log.i(TAG, "Initializing known companies list...")
+        try {
+            val companies = companyListProvider.loadCompanyList()
+            knownCompanies = companies 
+            if (knownCompanies.isEmpty()) {
+                Log.w(TAG, "Known companies list is empty after loading from provider.")
+            } else {
+                Log.i(TAG, "Successfully initialized ${knownCompanies.size} known companies.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing known companies: ${e.message}", e)
+            knownCompanies = emptyList() 
+        } finally {
+            knownCompaniesInitialized = true 
+        }
+    }
+
+    private fun buildPromptForCompanyDetection(email: RawEmail): String {
+        val bodySnippet = (email.bodySnippet ?: email.snippet ?: email.bodyPlainText ?: "").take(500)
+        return PROMPT_TEMPLATE_COMPANY_DETECTION
+            .replace("{email_from}", email.from.replace("\"", "\\\""))
+            .replace("{email_subject}", email.subject.replace("\"", "\\\""))
+            .replace("{email_body_snippet}", bodySnippet.replace("\"", "\\\""))
+    }
+
+    private fun buildPromptForDetailAnalysis(email: RawEmail, companyName: String, serviceHint: String): String {
+        val bodyFull = (email.bodyPlainText ?: email.bodySnippet ?: email.snippet ?: "").take(1500)
+        return PROMPT_TEMPLATE_DETAIL_ANALYSIS
+            .replace("{company_name}", companyName.replace("\"", "\\\""))
+            .replace("{service_hint}", serviceHint.ifBlank { "N/A" }.replace("\"", "\\\""))
+            .replace("{email_from}", email.from.replace("\"", "\\\""))
+            .replace("{email_subject}", email.subject.replace("\"", "\\\""))
+            .replace("{email_body_full}", bodyFull.replace("\"", "\\\""))
+    }
+
+    private fun parseLlmCompanyDetectionOutput(jsonString: String?): LlmCompanyDetectionOutput {
+        if (jsonString.isNullOrBlank()) {
+            Log.w(TAG, "Company detection LLM response was null or blank.")
+            return LlmCompanyDetectionOutput("Unknown", false, 0.0f)
+        }
+        return try {
+            val cleanedResponse = jsonString.substringAfter("```json\n", jsonString)
+                                           .substringBeforeLast("\n```", jsonString)
+                                           .trim()
+            val jsonObject = JSONObject(cleanedResponse)
+            LlmCompanyDetectionOutput(
+                company_name = jsonObject.optString("company_name", "Unknown").ifBlank { "Unknown" },
+                is_likely_subscription_related = jsonObject.optBoolean("is_likely_subscription_related", false),
+                confidence_company_detection = jsonObject.optDouble("confidence_company_detection", 0.0).toFloat()
+            )
+        } catch (e: org.json.JSONException) {
+            Log.e(TAG, "Failed to parse company detection LLM JSON: $jsonString Error: ${e.message}", e)
+            LlmCompanyDetectionOutput("Unknown", false, 0.0f)
+        }
+    }
+
+    private fun parseLlmDetailAnalysisOutput(jsonString: String?): LlmDetailAnalysisOutput {
+        if (jsonString.isNullOrBlank()) {
+            Log.w(TAG, "Detail analysis LLM response was null or blank.")
+            return LlmDetailAnalysisOutput(false, "none", "unknown", 0.0f)
+        }
+        return try {
+            val cleanedResponse = jsonString.substringAfter("```json\n", jsonString)
+                                           .substringBeforeLast("\n```", jsonString)
+                                           .trim()
+            val jsonObject = JSONObject(cleanedResponse)
+            LlmDetailAnalysisOutput(
+                subscription = jsonObject.optBoolean("subscription", false),
+                action = jsonObject.optString("action", "none").ifBlank { "none" },
+                date = jsonObject.optString("date", "unknown").ifBlank { "unknown" },
+                confidence_analysis = jsonObject.optDouble("confidence_analysis", 0.0).toFloat()
+            )
+        } catch (e: org.json.JSONException) {
+            Log.e(TAG, "Failed to parse detail analysis LLM JSON: $jsonString Error: ${e.message}", e)
+            LlmDetailAnalysisOutput(false, "none", "unknown", 0.0f)
+        }
+    }
+    
+    private fun normalizeString(input: String): String {
+        val normalized = Normalizer.normalize(input, Normalizer.Form.NFD)
+        val noDiacritics = Regex("\\p{Mn}+").replace(normalized, "")
+        return noDiacritics.lowercase()
+            .replace(" inc.", "")
+            .replace(" ltd.", "")
+            .replace(" llc", "")
+            .replace(".com", "")
+            .replace(" com tr", "")
+            .replace("www.", "")
+            .replace(Regex("[^a-z0-9\\s-]"), "") 
+            .replace(Regex("\\s+"), " ") 
+            .trim()
+    }
+
+    private fun findMatchingKnownCompany(detectedName: String?): CompanySubscriptionInfo? {
+        if (detectedName.isNullOrBlank() || detectedName.equals("Unknown", ignoreCase = true)) {
+            return null
+        }
+         if (!::knownCompanies.isInitialized || knownCompanies.isEmpty()){
+            Log.w(TAG, "Known company list is not initialized or empty when trying to match: $detectedName.")
+            return null
+        }
+
+        val normalizedDetectedName = normalizeString(detectedName)
+
+        knownCompanies.firstOrNull { company ->
+            normalizeString(company.companyName) == normalizedDetectedName
+        }?.let {
+            Log.d(TAG, "Exact match found for '$detectedName' (normalized: $normalizedDetectedName) -> '${it.companyName}'")
+            return it
+        }
+
+        knownCompanies.firstOrNull { company ->
+            val normalizedKnownName = normalizeString(company.companyName)
+            normalizedKnownName.contains(normalizedDetectedName) || normalizedDetectedName.contains(normalizedKnownName)
+        }?.let {
+            Log.d(TAG, "Contains match found for '$detectedName' (normalized: $normalizedDetectedName) -> '${it.companyName}'")
+            return it
+        }
+        
+        knownCompanies.firstOrNull { company ->
+            val normalizedKnownName = normalizeString(company.companyName)
+            normalizedDetectedName.startsWith(normalizedKnownName)
+        }?.let {
+            Log.d(TAG, "Starts with match for '$detectedName' (normalized: $normalizedDetectedName) -> '${it.companyName}'")
+            return it
+        }
+
+        Log.d(TAG, "No match found in known companies for: $detectedName (normalized: $normalizedDetectedName)")
+        return null
+    }
+
+    private fun determineDatabaseOp(action: String?, companyName: String, history: MutableMap<String, String>): String {
+        val companyKey = companyName.lowercase().trim() 
+        if (companyKey.isBlank() || companyKey == "unknown" || action.isNullOrBlank() || action == "none") {
+            return "NONE"
+        }
+
+        return when (action) {
+            "start", "trial_start" -> {
+                if (history[companyKey] != "start") { 
+                    history[companyKey] = "start"
+                    "CREATE_EVENT"
+                } else {
+                    Log.d(TAG, "Duplicate 'start' or 'trial_start' action for $companyKey, op: NONE.")
+                    "NONE"
+                }
+            }
+            "cancel" -> {
+                if (history[companyKey] == "start" || history[companyKey] == "renew") {
+                    history[companyKey] = "cancel"
+                    "UPDATE_EVENT"
+                } else {
+                    Log.d(TAG, "Cancel action for $companyKey without prior 'start' or 'renew', op: NONE. Current history: ${history[companyKey]}")
+                    "NONE"
+                }
+            }
+            "renew" -> {
+                if (history[companyKey] == "start" || history[companyKey] == "renew") {
+                    history[companyKey] = "renew" 
+                    "NONE"
+                } else if (history[companyKey] == null || history[companyKey] == "cancel") {
+                    history[companyKey] = "start" 
+                    Log.d(TAG, "Renewal for $companyKey with no/cancelled prior history, treating as CREATE_EVENT.")
+                    "CREATE_EVENT"
+                } else {
+                    Log.d(TAG, "Renewal for $companyKey with unexpected history '${history[companyKey]}', op: NONE.")
+                    "NONE"
+                }
+            }
+            else -> "NONE"
+        }
+    }
 }
-// The String.capitalizeWords() extension function is removed as it's part of the old logic.

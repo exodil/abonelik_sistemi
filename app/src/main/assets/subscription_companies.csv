@@ -1,0 +1,131 @@
+CompanyName,Category,ServiceType
+Netflix,Medya/Video,Film ve dizi akış hizmeti
+Amazon Prime Video,Medya/Video,Film ve dizi akış hizmeti (Prime üyeliği avantajı)
+Disney+,Medya/Video,Film ve dizi akış hizmeti
+HBO Max,Medya/Video,Film ve dizi akış hizmeti
+Hulu,Medya/Video,Dizi ve TV programı akış hizmeti
+Peacock,Medya/Video,Film, dizi ve TV akış hizmeti
+Paramount+,Medya/Video,Film ve dizi akış hizmeti
+Crunchyroll,Medya/Video,Anime dizi ve film akış hizmeti
+Starz,Medya/Video,Film ve dizi akış hizmeti
+ESPN+,Medya/Spor,Canlı spor ve TV akış hizmeti (spor içerikleri)
+DAZN,Medya/Spor,Canlı spor yayın hizmeti (futbol, dövüş, vs.)
+MUBI,Medya/Video,Bağımsız sanat filmleri akış hizmeti
+JioCinema,Medya/Video,Video akış hizmeti (Hindistan)
+Globoplay,Medya/Video,Video akış hizmeti (Brezilya)
+Viu,Medya/Video,Video akış hizmeti (Asya dizi/film)
+Discovery+,Medya/Video,Belgesel ve eğlence akış hizmeti
+Zee5,Medya/Video,Video akış hizmeti (Hindistan)
+RTL+,Medya/Video,Video akış hizmeti (Almanya)
+ivi TV,Medya/Video,Video akış hizmeti (Rusya)
+Shahid,Medya/Video,Video akış hizmeti (Orta Doğu)
+YouTube Premium,Medya/Video,Reklamsız video ve müzik akış (YouTube)
+Spotify,Medya/Müzik,Müzik akış hizmeti
+Apple Music,Medya/Müzik,Müzik akış hizmeti
+Amazon Music,Medya/Müzik,Müzik akış hizmeti (Amazon üyeliği içinde)
+Tidal,Medya/Müzik,Müzik akış hizmeti (yüksek kaliteli ses)
+Deezer,Medya/Müzik,Müzik akış hizmeti
+SoundCloud Go,Medya/Müzik,Müzik akış hizmeti
+Audible,Medya/Kitap,Sesli kitap aboneliği
+Kindle Unlimited,Medya/Kitap,E-kitap aboneliği
+Storytel,Medya/Kitap,Sesli kitap aboneliği
+Medium,Medya/Haber,Çevrimiçi makale aboneliği
+Netflix Audio,Medya/Müzik,Şarkı listeleri ve podcast
+DIGITURK TOD,Medya/Video,Canlı maç ve video on-demand yayın hizmeti (Türkiye)
+Exxen,Medya/Video,Türk yapımı dizi ve program akış platformu
+BluTV,Medya/Video,Türk yapımı dizi ve film akış platformu
+Gain,Medya/Video,Türkçe dijital video akış servisi
+D-Smart GO,Medya/Video,Canlı TV ve içerik akış platformu
+Tv+,Medya/Video,Canlı TV ve içerik akış hizmeti
+DAİLOKAN,Medya/Video,(örnek yerel servis)
+Coursera,Eğitim,Çevrimiçi üniversite dersleri ve sertifikaları
+Udemy,Eğitim,Çevrimiçi eğitim ve kurs platformu
+LinkedIn Learning,Eğitim,Mesleki beceri eğitim platformu
+MasterClass,Eğitim,Ünlülerden video eğitim dersleri
+Khan Academy,Eğitim,Ücretsiz çevrimiçi eğitim platformu
+Codecademy,Eğitim,Programlama eğitimi platformu
+Udacity,Eğitim,Teknoloji nanodegree programları
+Skillshare,Eğitim,Yaratıcı sanat ve tasarım kursları
+Duolingo Plus,Eğitim,Dil öğrenme uygulaması (reklamsız ve ekstra özellikler)
+Babbel,Eğitim,Dil öğrenme uygulaması
+Rosetta Stone,Eğitim,Dil öğrenme uygulaması
+Brilliant,Eğitim,STEM (fen, matematik) eğitim platformu
+Photomath,Eğitim,Matematik çözüm ve eğitim uygulaması
+Pluralsight,Eğitim,Yazılım ve teknoloji eğitim platformu
+Peloton,Sağlık/Fitness,İnteraktif bisiklet ve canlı egzersiz dersleri
+ClassPass,Sağlık/Fitness,Çoklu spor salonu üyelik/abonelik hizmeti
+Apple Fitness+,Sağlık/Fitness,Video tabanlı kişisel antrenman programı
+Fitbit Premium,Sağlık/Fitness,Sağlık ve aktivite izleme hizmeti
+Calm,Sağlık/Mental,Meditasyon ve uyku sesi uygulaması
+Headspace,Sağlık/Mental,Meditasyon uygulaması
+WW (Weight Watchers),Sağlık/Beslenme,Diyet ve yaşam koçluğu hizmeti
+Noom,Sağlık/Beslenme,Davranış bazlı kilo yönetimi programı
+Tonal,Sağlık/Fitness,Dijital ağırlık antrenmanı cihazı ve içerikleri
+Mirror (Lululemon),Sağlık/Fitness,Akıllı antrenman aynası ve canlı dersler
+Zwift,Sağlık/Fitness,Sanal bisiklet/beklenmedik antrenman simülasyonu
+BetterHelp,Sağlık/Mental,Online psikolojik danışmanlık
+Talkspace,Sağlık/Mental,Online terapist görüşmesi
+Nike Training Club,Sağlık/Fitness,Kişisel egzersiz programları
+Strava Premium,Sağlık/Fitness,Spor aktivite takibi hizmeti
+Bloomberg Terminal,Finans,Canlı finansal veri ve analiz terminal hizmeti
+The Wall Street Journal,Medya/Haber,Dijital gazete aboneliği
+Financial Times,Medya/Haber,Dijital ekonomi ve finans gazetesi aboneliği
+The Economist,Medya/Haber,Ekonomi dergisi aboneliği
+The New York Times,Medya/Haber,Dijital gazete aboneliği
+The Washington Post,Medya/Haber,Dijital gazete aboneliği
+Forbes,Medya/Haber,Finans ve ekonomi dergisi aboneliği
+Barron's,Medya/Haber,Finans gazetesi aboneliği
+Yahoo Finance Premium,Finans,Piyasa verisi ve analiz aboneliği
+Seeking Alpha,Finans,Yatırımcı analizleri ve veri aboneliği
+Morningstar Premium,Finans,Yatırım veri ve analiz hizmeti
+Reuters News,Medya/Haber,Haber ajansı aboneliği
+Xbox Game Pass,Oyun,Çok sayıda Xbox oyunu aboneliği
+PlayStation Plus,Oyun,Çok sayıda PlayStation oyunu aboneliği
+Nintendo Switch Online,Oyun,Çevrimiçi oyun ve klasik oyun aboneliği
+EA Play,Oyun,EA oyunları aboneliği
+Apple Arcade,Oyun,Mobil oyun aboneliği
+Ubisoft+,Oyun,Ubisoft oyunları aboneliği
+Twitch (Prime Gaming),Medya/Oyun,Canlı yayın + oyun içi içerik aboneliği (Prime ile)
+Discord Nitro,İletişim/Oyun,Ücretli Discord aboneliği (ekstra özellikler)
+Roblox Premium,Oyun,Roblox oyun ve içerik aboneliği
+PlayStation Now,Oyun,Bulut oyun aboneliği (PlayStation oyun arşivi)
+Microsoft 365,Yazılım/SaaS,Ofis uygulamaları ve bulut hizmet aboneliği
+Google Workspace,Yazılım/SaaS,Bulut e-posta ve ofis hizmetleri
+Adobe Creative Cloud,Yazılım/SaaS,Grafik/multimedya tasarım yazılımları aboneliği
+Salesforce,Yazılım/SaaS,CRM (müşteri ilişkileri) platformu aboneliği
+AWS (Amazon Web Services),Yazılım/SaaS,Bulut bilişim hizmetleri (sunucu, depolama, veritabanı)
+Microsoft Azure,Yazılım/SaaS,Bulut bilişim hizmetleri
+Zoom,Yazılım/SaaS,Video konferans ve uzaktan iletişim hizmeti
+Slack,Yazılım/SaaS,Kurumsal iletişim ve işbirliği platformu
+Atlassian Jira,Yazılım/SaaS,Proje ve iş takibi platformu
+Atlassian Confluence,Yazılım/SaaS,Bilgi/döküman yönetimi platformu
+Dropbox,Yazılım/SaaS,Bulut dosya depolama ve paylaşım hizmeti
+Box,Yazılım/SaaS,Bulut dosya depolama ve işbirliği hizmeti
+GitHub,Yazılım/SaaS,Kod paylaşım ve sürüm kontrol platformu
+GitLab,Yazılım/SaaS,Kod paylaşım ve CI/CD platformu
+Canva,Yazılım/SaaS,Grafik tasarım araçları (çevrimiçi)
+Asana,Yazılım/SaaS,Proje ve iş yönetim platformu
+Trello,Yazılım/SaaS,Proje panoları ve iş takibi platformu
+DocuSign,Yazılım/SaaS,Elektronik imza ve doküman yönetimi hizmeti
+Eventbrite,Yazılım/SaaS,Etkinlik ve bilet yönetim platformu
+Grammarly,Yazılım/SaaS,Yazım denetimi ve dilbilgisi hizmeti
+Webflow,Yazılım/SaaS,Web sitesi tasarım ve barındırma platformu
+HubSpot,Yazılım/SaaS,Pazarlama ve CRM otomasyon platformu
+Mailchimp,Yazılım/SaaS,E-posta pazarlama platformu
+SurveyMonkey,Yazılım/SaaS,Çevrimiçi anket platformu
+Zendesk,Yazılım/SaaS,Müşteri destek sistemi
+ServiceNow,Yazılım/SaaS,BT hizmet yönetimi platformu
+Twilio,Yazılım/SaaS,Bulut iletişim API’ları
+Autodesk,Yazılım/SaaS,3D tasarım ve mühendislik yazılımları aboneliği
+Shopify,Yazılım/SaaS,E-ticaret mağaza platformu
+Amazon Prime,Perakende/Üyelik,Ücretsiz kargo, Prime Video/Müzik gibi çoklu hizmet aboneliği
+Costco,Perakende/Üyelik,Depo mağaza üyeliği (indirimli alışveriş)
+Sam’s Club,Perakende/Üyelik,Depo mağaza üyeliği (indirimli alışveriş)
+HelloFresh,Tüketici Ürünleri,Hazır yemek kiti aboneliği
+Blue Apron,Tüketici Ürünleri,Yemek kiti aboneliği
+Dollar Shave Club,Tüketici Ürünleri,Tıraş bıçağı aboneliği
+Birchbox,Tüketici Ürünleri,Güzellik ürünleri kutusu aboneliği
+BarkBox,Evcil Hayvan,Köpek mamaları/oyuncak aylık kutu aboneliği
+Graze,Tüketici Ürünleri,Atıştırmalık abonelik kutuları
+Patreon,İçerik,Yaratıcılara bağış/abonelik platformu
+OnlyFans,İçerik,Yaratıcı içerik (yetişkin) abonelik platformu
