@@ -43,7 +43,7 @@ android {
     }
     composeOptions {
         // Kotlin 1.9.21 için uyumlu Compose Compiler versiyonu (Kontrol edin: developer.android.com/jetpack/androidx/releases/compose-kotlin)
-        kotlinCompilerExtensionVersion '1.5.7' // Kotlin 1.9.21 için genellikle 1.5.3 veya 1.5.4 uygundur.
+        kotlinCompilerExtensionVersion '1.5.5' // Kotlin 1.9.21 için genellikle 1.5.3 veya 1.5.4 uygundur.
     }
 
     packagingOptions {
