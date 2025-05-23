@@ -12,8 +12,8 @@ import com.example.abonekaptanmobile.auth.GoogleAuthManager
 import com.example.abonekaptanmobile.data.local.entity.FeedbackEntity
 import com.example.abonekaptanmobile.data.repository.FeedbackRepository
 import com.example.abonekaptanmobile.data.repository.GmailRepository
+import com.example.abonekaptanmobile.model.EmailAnalysisResult
 import com.example.abonekaptanmobile.model.RawEmail
-import com.example.abonekaptanmobile.model.SubscriptionItem
 import com.example.abonekaptanmobile.model.SubscriptionStatus
 import com.example.abonekaptanmobile.services.SubscriptionClassifier
 import com.example.abonekaptanmobile.workers.ProcessFeedbackWorker
@@ -45,8 +45,8 @@ class MainViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _subscriptions = MutableStateFlow<List<SubscriptionItem>>(emptyList())
-    val subscriptions: StateFlow<List<SubscriptionItem>> = _subscriptions.asStateFlow()
+    private val _subscriptions = MutableStateFlow<List<EmailAnalysisResult>>(emptyList())
+    val subscriptions: StateFlow<List<EmailAnalysisResult>> = _subscriptions.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
@@ -132,17 +132,17 @@ class MainViewModel @Inject constructor(
                     )
                 }
 
-                val finalSubscriptionItems = subscriptionClassifier.classifyEmails(emailsWithSnippets)
-                Log.d("MainViewModel", "Classifier returned ${finalSubscriptionItems.size} subscription items.") // YENİ LOG
-                _subscriptions.value = finalSubscriptionItems
+                val finalProcessedEmails = subscriptionClassifier.processEmailsWithLLM(emailsWithSnippets)
+                Log.d("MainViewModel", "LLM Classifier returned ${finalProcessedEmails.size} processed email results.")
+                _subscriptions.value = finalProcessedEmails
 
-                if (finalSubscriptionItems.isEmpty()) {
+                if (finalProcessedEmails.isEmpty()) {
                     if (rawEmails.isNotEmpty()) {
-                        _error.value = "E-postalarınız analiz edildi ancak uygun bir abonelik bulunamadı."
-                        Log.i("MainViewModel", "Emails analyzed, but no subscriptions classified.")
+                        _error.value = "E-postalarınız analiz edildi ancak uygun bir abonelik veya ilgili e-posta bulunamadı."
+                        Log.i("MainViewModel", "Emails analyzed by LLM, but no relevant email results classified.")
                     } else {
-                        _error.value = "Abonelik bulunamadı veya e-postalar yüklenemedi. Lütfen yenileyin veya daha sonra tekrar deneyin."
-                        Log.w("MainViewModel", "No raw emails fetched, so no subscriptions found.")
+                        _error.value = "Abonelik bilgisi bulunamadı veya e-postalar yüklenemedi. Lütfen yenileyin veya daha sonra tekrar deneyin."
+                        Log.w("MainViewModel", "No raw emails fetched, so no email analysis results found.")
                     }
                 }
 
