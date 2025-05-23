@@ -23,13 +23,12 @@ class SubscriptionClassifier @Inject constructor(
 ) {
     companion object {
         private const val TAG = "SubscriptionClassifier"
-    }
 
-    /**
-     * Prompt template for the first stage LLM call: Company Detection.
-     * Aims to identify the company name and assess if the email is likely subscription-related.
-     */
-    private const val PROMPT_TEMPLATE_COMPANY_DETECTION = """
+        /**
+         * Prompt template for the first stage LLM call: Company Detection.
+         * Aims to identify the company name and assess if the email is likely subscription-related.
+         */
+        private const val PROMPT_TEMPLATE_COMPANY_DETECTION = """
 Analyze the following email content to identify the primary company or service mentioned and determine if it's likely related to a subscription.
 Email From: "{email_from}"
 Email Subject: "{email_subject}"
@@ -52,12 +51,12 @@ Example JSON output:
 Return ONLY the JSON object.
 """
 
-    /**
-     * Prompt template for the second stage LLM call: Detail Analysis.
-     * Used if a known company is detected and the email is likely subscription-related.
-     * Aims to extract specific details about the subscription action.
-     */
-    private const val PROMPT_TEMPLATE_DETAIL_ANALYSIS = """
+        /**
+         * Prompt template for the second stage LLM call: Detail Analysis.
+         * Used if a known company is detected and the email is likely subscription-related.
+         * Aims to extract specific details about the subscription action.
+         */
+        private const val PROMPT_TEMPLATE_DETAIL_ANALYSIS = """
 Analyze the following email content from "{company_name}" (service hint: {service_hint}) for specific subscription details.
 Email From: "{email_from}"
 Email Subject: "{email_subject}"
