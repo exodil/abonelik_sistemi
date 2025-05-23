@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+// import androidx.compose.runtime.saveable.rememberSaveable // Not used in this change
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.abonekaptanmobile.ui.components.HorizontalProgressBar
 import com.example.abonekaptanmobile.ui.screens.SignInScreen
 import com.example.abonekaptanmobile.ui.screens.SubscriptionListScreen
 import com.example.abonekaptanmobile.ui.theme.AboneKaptanMobileTheme
@@ -35,6 +37,11 @@ class MainActivity : ComponentActivity() {
                 val isSigningIn by viewModel.isSigningIn.collectAsState()
                 val error by viewModel.error.collectAsState()
                 val snackbarHostState = remember { SnackbarHostState() }
+
+                // States for the HorizontalProgressBar
+                val progressPercentage by viewModel.progressPercentage.collectAsState()
+                val progressMessage by viewModel.progressMessage.collectAsState()
+                val estimatedTimeRemaining by viewModel.estimatedTimeRemaining.collectAsState()
 
 
                 val signInLauncher = rememberLauncherForActivityResult(
@@ -72,17 +79,26 @@ class MainActivity : ComponentActivity() {
                             .padding(paddingValues),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        if (isLoading || isSigningIn) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier.fillMaxSize()
-                            ) {
-                                CircularProgressIndicator()
+                        when {
+                            isLoading -> { // Main loading state for fetching/classifying
+                                HorizontalProgressBar(
+                                    progress = progressPercentage / 100f,
+                                    progressText = progressMessage ?: "Yükleniyor...",
+                                    estimatedTimeRemainingText = estimatedTimeRemaining
+                                )
                             }
-                        } else {
-                            if (isSignedIn) {
+                            isSigningIn -> { // Distinct, typically shorter, sign-in phase
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    CircularProgressIndicator()
+                                }
+                            }
+                            isSignedIn -> {
                                 SubscriptionListScreen(viewModel = viewModel)
-                            } else {
+                            }
+                            else -> { // Not loading, not signing in, not signed in -> Show SignInScreen
                                 SignInScreen(
                                     onSignInClick = {
                                         viewModel.startSignIn(signInLauncher)
