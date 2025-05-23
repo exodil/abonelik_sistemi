@@ -10,11 +10,13 @@ import com.example.abonekaptanmobile.data.local.dao.CommunityPatternDao
 import com.example.abonekaptanmobile.data.local.dao.FeedbackDao
 import com.example.abonekaptanmobile.data.remote.GmailApi
 import com.example.abonekaptanmobile.data.remote.HuggingFaceApi
-import com.example.abonekaptanmobile.data.repository.CommunityPatternRepository
+// CommunityPatternRepository import will be removed if not used elsewhere, but let's keep it for now and just change the provider
+import com.example.abonekaptanmobile.data.repository.CommunityPatternRepository 
 import com.example.abonekaptanmobile.data.repository.FeedbackRepository
 import com.example.abonekaptanmobile.data.repository.GmailRepository
 import com.example.abonekaptanmobile.data.repository.HuggingFaceRepository
 import com.example.abonekaptanmobile.services.SubscriptionClassifier
+import com.example.abonekaptanmobile.util.CompanyListProvider 
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -156,9 +158,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideSubscriptionClassifier(
-        communityPatternRepo: CommunityPatternRepository,
-        huggingFaceRepository: HuggingFaceRepository
+        huggingFaceRepository: HuggingFaceRepository,
+        companyListProvider: CompanyListProvider 
     ): SubscriptionClassifier {
-        return SubscriptionClassifier(communityPatternRepo, huggingFaceRepository)
+        return SubscriptionClassifier(huggingFaceRepository, companyListProvider)
     }
 }
