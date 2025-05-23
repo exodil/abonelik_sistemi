@@ -1,8 +1,8 @@
 // file: app/java/com/example/abonekaptanmobile/data/remote/HuggingFaceApi.kt
 package com.example.abonekaptanmobile.data.remote
 
-import com.example.abonekaptanmobile.data.remote.model.HuggingFaceRequest
-import com.example.abonekaptanmobile.data.remote.model.HuggingFaceResponse
+import com.example.abonekaptanmobile.data.remote.model.TextGenerationRequest
+import com.example.abonekaptanmobile.data.remote.model.TextGenerationResponseItem
 import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
@@ -12,14 +12,18 @@ import retrofit2.http.POST
  * English: Retrofit interface for Hugging Face API.
  */
 interface HuggingFaceApi {
-    
+
     /**
-     * Turkish: Zero-shot sınıflandırma için Hugging Face API'sine istek gönderir.
-     * English: Sends a request to Hugging Face API for zero-shot classification.
+     * Turkish: Metin üretimi için Hugging Face API'sine istek gönderir.
+     * English: Sends a request to Hugging Face API for text generation.
+     *
+     * @param authToken The authorization token for the API.
+     * @param request The request body containing the input prompt and generation parameters.
+     * @return A list of text generation results.
      */
-    @POST("models/facebook/bart-large-mnli")
-    suspend fun classifyText(
+    @POST("models/google/flan-t5-large")
+    suspend fun generateText(
         @Header("Authorization") authToken: String,
-        @Body request: HuggingFaceRequest
-    ): HuggingFaceResponse
+        @Body request: TextGenerationRequest
+    ): List<TextGenerationResponseItem>
 }
