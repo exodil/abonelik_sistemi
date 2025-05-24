@@ -18,8 +18,8 @@ import java.text.Normalizer
  */
 @Singleton
 class SubscriptionClassifier @Inject constructor(
-    private val huggingFaceRepository: HuggingFaceRepository,
-    private val companyListProvider: CompanyListProvider
+    val huggingFaceRepository: HuggingFaceRepository, // 'private' kaldırıldı
+    val companyListProvider: CompanyListProvider  // 'private' kaldırıldı
 ) {
     companion object {
         private const val TAG = "SubscriptionClassifier"
