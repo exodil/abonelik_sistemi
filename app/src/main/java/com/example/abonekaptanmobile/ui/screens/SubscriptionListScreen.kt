@@ -19,27 +19,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.abonekaptanmobile.R
-import com.example.abonekaptanmobile.model.SubscriptionItem
-import com.example.abonekaptanmobile.model.SubscriptionStatus
+import com.example.abonekaptanmobile.model.EmailAnalysisResult // Updated import
+import com.example.abonekaptanmobile.model.SubscriptionStatus // Kept for FeedbackDialog
 import com.example.abonekaptanmobile.ui.viewmodel.MainViewModel
-import java.text.SimpleDateFormat
-import java.util.*
+//SimpleDateFormat and Date are no longer needed as item.date is a String
+//import java.text.SimpleDateFormat
+//import java.util.*
 
 // Turkish: Abonelikleri listeleyen ekran.
 // English: Screen that lists subscriptions.
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class) // ExperimentalFoundationApi might not be needed anymore
 @Composable
 fun SubscriptionListScreen(viewModel: MainViewModel) {
     val subscriptions by viewModel.subscriptions.collectAsState()
     var showFeedbackDialog by remember { mutableStateOf(false) }
-    var selectedSubscriptionItem by remember { mutableStateOf<SubscriptionItem?>(null) }
+    var selectedSubscriptionItem by remember { mutableStateOf<EmailAnalysisResult?>(null) } // Updated type
 
-    val groupedSubscriptions = subscriptions.groupBy { it.status }
-    val activeSubscriptions = groupedSubscriptions[SubscriptionStatus.ACTIVE] ?: emptyList()
-    val forgottenSubscriptions = groupedSubscriptions[SubscriptionStatus.FORGOTTEN] ?: emptyList()
-    val cancelledSubscriptions = groupedSubscriptions[SubscriptionStatus.CANCELLED] ?: emptyList()
-    val unknownSubscriptions = groupedSubscriptions[SubscriptionStatus.UNKNOWN] ?: emptyList()
-
+    // Grouping logic removed
+    // val groupedSubscriptions = subscriptions.groupBy { it.status }
+    // val activeSubscriptions = groupedSubscriptions[SubscriptionStatus.ACTIVE] ?: emptyList()
+    // val forgottenSubscriptions = groupedSubscriptions[SubscriptionStatus.FORGOTTEN] ?: emptyList()
+    // val cancelledSubscriptions = groupedSubscriptions[SubscriptionStatus.CANCELLED] ?: emptyList()
+    // val unknownSubscriptions = groupedSubscriptions[SubscriptionStatus.UNKNOWN] ?: emptyList()
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -67,75 +68,43 @@ fun SubscriptionListScreen(viewModel: MainViewModel) {
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                if (activeSubscriptions.isNotEmpty()) {
-                    stickyHeader { SubscriptionHeader(title = stringResource(R.string.active_subscriptions)) }
-                    items(activeSubscriptions, key = { it.serviceName + it.lastEmailDate }) { item ->
-                        SubscriptionCard(item = item, onFeedbackClick = {
-                            selectedSubscriptionItem = it
-                            showFeedbackDialog = true
-                        })
-                    }
-                }
-
-                if (forgottenSubscriptions.isNotEmpty()) {
-                    stickyHeader { SubscriptionHeader(title = stringResource(R.string.forgotten_subscriptions)) }
-                    items(forgottenSubscriptions, key = { it.serviceName + it.lastEmailDate }) { item ->
-                        SubscriptionCard(item = item, onFeedbackClick = {
-                            selectedSubscriptionItem = it
-                            showFeedbackDialog = true
-                        })
-                    }
-                }
-
-                if (cancelledSubscriptions.isNotEmpty()) {
-                    stickyHeader { SubscriptionHeader(title = stringResource(R.string.cancelled_subscriptions)) }
-                    items(cancelledSubscriptions, key = { it.serviceName + it.lastEmailDate }) { item ->
-                        SubscriptionCard(item = item, onFeedbackClick = {
-                            selectedSubscriptionItem = it
-                            showFeedbackDialog = true
-                        })
-                    }
-                }
-                if (unknownSubscriptions.isNotEmpty()) {
-                    stickyHeader { SubscriptionHeader(title = stringResource(R.string.unknown_subscriptions)) }
-                    items(unknownSubscriptions, key = { it.serviceName + it.lastEmailDate }) { item ->
-                        SubscriptionCard(item = item, onFeedbackClick = {
-                            selectedSubscriptionItem = it
-                            showFeedbackDialog = true
-                        })
-                    }
+                // Sticky headers removed, using a single list
+                items(subscriptions, key = { item -> item.company + item.date + item.email_index }) { item ->
+                    SubscriptionCard(item = item, onFeedbackClick = {
+                        selectedSubscriptionItem = it
+                        showFeedbackDialog = true
+                    })
                 }
             }
         }
     }
 
     if (showFeedbackDialog && selectedSubscriptionItem != null) {
+        // Assuming FeedbackDialog.kt will be updated separately to accept EmailAnalysisResult
+        // For now, we adjust the call as per instructions.
         FeedbackDialog(
-            item = selectedSubscriptionItem!!,
+            item = selectedSubscriptionItem!!, // This is now EmailAnalysisResult
             onDismiss = { showFeedbackDialog = false },
-            onSubmit = { serviceName, originalStatus, feedbackLabel, note ->
-                viewModel.submitFeedback(serviceName, originalStatus, feedbackLabel, note)
+            onSubmit = { _, _, feedbackLabel, note -> // serviceName and originalStatus from dialog are ignored
+                viewModel.submitFeedback(
+                    selectedSubscriptionItem!!.company, // Use company from EmailAnalysisResult
+                    SubscriptionStatus.UNKNOWN, // Use fixed UNKNOWN status
+                    feedbackLabel,
+                    note
+                )
                 showFeedbackDialog = false
             }
         )
     }
 }
 
-@Composable
-fun SubscriptionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f))
-            .padding(vertical = 8.dp, horizontal = 16.dp)
-    )
-}
+// SubscriptionHeader is no longer needed as sticky headers are removed.
+// @Composable
+// fun SubscriptionHeader(title: String) { ... }
 
 @Composable
-fun SubscriptionCard(item: SubscriptionItem, onFeedbackClick: (SubscriptionItem) -> Unit) {
-    val dateFormatter = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+fun SubscriptionCard(item: EmailAnalysisResult, onFeedbackClick: (EmailAnalysisResult) -> Unit) {
+    // dateFormatter removed as item.date is a String
 
     Card(
         modifier = Modifier
@@ -144,13 +113,23 @@ fun SubscriptionCard(item: SubscriptionItem, onFeedbackClick: (SubscriptionItem)
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(item.serviceName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(item.company, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(4.dp))
-            Text("${stringResource(R.string.email_count)}: ${item.emailCount}", style = MaterialTheme.typography.bodyMedium)
-            Text("${stringResource(R.string.last_email_date)}: ${dateFormatter.format(Date(item.lastEmailDate))}", style = MaterialTheme.typography.bodyMedium)
-            item.cancellationDate?.let {
-                Text("${stringResource(R.string.cancellation_date)}: ${dateFormatter.format(Date(it))}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+            // Email count removed as it's not in EmailAnalysisResult
+            // Text("${stringResource(R.string.email_count)}: ${item.emailCount}", style = MaterialTheme.typography.bodyMedium)
+            
+            // Using hardcoded string "Olay Tarihi:" as R.string.event_date might not be available
+            Text("Olay Tarihi: ${item.date}", style = MaterialTheme.typography.bodyMedium)
+            
+            if (item.action == "cancel") {
+                // Using hardcoded string "İptal Tarihi:" as R.string.cancellation_date_label might not be available
+                Text("İptal Tarihi: ${item.date}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             }
+            Text("Aksiyon: ${item.action}", style = MaterialTheme.typography.bodySmall)
+            Text("Veritabanı Op: ${item.database_op}", style = MaterialTheme.typography.bodySmall)
+            Text("Güven Skoru: ${String.format("%.2f", item.confidence)}", style = MaterialTheme.typography.bodySmall)
+
+
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(
                 onClick = { onFeedbackClick(item) },
